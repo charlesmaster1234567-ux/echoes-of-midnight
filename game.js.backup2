@@ -1,0 +1,1420 @@
+// ═════════════════════════════════════════════════════════════════
+//  ECHOES OF MIDNIGHT — Ultimate Engine (Polished)
+//  • Reuses lighting canvas (no per-frame allocation)
+//  • Defers to AudioManager's playSound/initAudio (no override)
+//  • Guards against recursive level-up / mission cascades
+//  • Safe callbacks (try/catch everywhere)
+//  • Bounded dialog queue
+//  • Frame counter wraps
+//  • Cleared timeouts
+//  • All external systems wired
+// ═════════════════════════════════════════════════════════════════
+
+// ─── DOM ────────────────────────────────────────────────────────
+const canvas         = document.getElementById("gameCanvas");
+const ctx            = canvas.getContext("2d");
+const minimapCanvas  = document.getElementById("minimap");
+const minimapCtx     = minimapCanvas ? minimapCanvas.getContext("2d") : null;
+const dialogBox      = document.getElementById("dialogBox");
+const dialogSpeaker  = document.getElementById("dialogSpeaker");
+const dialogText     = document.getElementById("dialogText");
+const dialogChoices  = document.getElementById("dialogChoices");
+const dialogContinue = document.getElementById("dialogContinue");
+const inventoryEl    = document.getElementById("inventory");
+const journalEl      = document.getElementById("journal");
+const journalContent = document.getElementById("journalContent");
+const journalClose   = document.getElementById("journalClose");
+const levelUpNotice  = document.getElementById("levelUpNotice");
+
+// ─── CANVAS ─────────────────────────────────────────────────────
+function resizeCanvas() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    if (minimapCanvas) { minimapCanvas.width = 160; minimapCanvas.height = 120; }
+}
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+
+// ─── AUDIO ──────────────────────────────────────────────────────
+// IMPORTANT: We do NOT redefine playSound() or initAudio() here.
+// audio_manager.js already defines them globally. Just call them.
+// We expose audioCtx for any legacy callers.
+let audioCtx = null;
+
+function _ensureAudio() {
+    if (typeof initAudio === "function") {
+        try {
+            initAudio();
+            if (typeof AudioManager !== "undefined" && AudioManager.ctx) {
+                audioCtx = AudioManager.ctx;
+            }
+        } catch (e) { console.warn("Audio init failed:", e); }
+    } else if (typeof AudioEngine !== "undefined" && AudioEngine.init) {
+        try { AudioEngine.init(); AudioEngine.resume(); audioCtx = AudioEngine.ctx; }
+        catch (e) {}
+    }
+}
+
+// Minimal noop fallback so internal calls never crash if audio scripts missing
+if (typeof window.playSound !== "function") {
+    window.playSound = function() {};
+}
+
+// ─── INPUT ──────────────────────────────────────────────────────
+const keys = {};
+const keysJustPressed = {};
+
+window.addEventListener("keydown", e => {
+    if (!keys[e.code]) keysJustPressed[e.code] = true;
+    keys[e.code] = true;
+    if (["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight",
+         "Tab","ShiftLeft","ShiftRight","Escape"].includes(e.code)) {
+        e.preventDefault();
+    }
+    _ensureAudio();
+});
+window.addEventListener("keyup", e => { keys[e.code] = false; });
+
+canvas.addEventListener("click", () => {
+    _ensureAudio();
+    if (gameState === "menu") startNewGame();
+    else if (gameState === "playing" && dialogActive) advanceDialog();
+    else if (gameState === "ending") gameState = "menu";
+});
+
+if (journalClose) journalClose.addEventListener("click", () => {
+    journalEl.classList.add("hidden"); journalOpen = false;
+});
+
+function consumeKey(code)   { keysJustPressed[code] = false; }
+function clearJustPressed() { for (let k in keysJustPressed) keysJustPressed[k] = false; }
+
+// ─── GAME STATE ─────────────────────────────────────────────────
+let gameState        = "menu";
+let frame            = 0;
+let dialogActive     = false;
+let journalOpen      = false;
+let currentDialog    = null;
+let dialogQueue      = [];
+let dialogCallback   = null;
+let transitionAlpha  = 0;
+let transitionState  = "none";
+let transitionCallback = null;
+let stepTimer        = 0;
+let roomsVisited     = new Set();
+
+// Guards against recursive cascades
+let _checkingMissions = false;
+let _levelingUp       = false;
+let _levelUpTimeout   = null;
+
+// Reused offscreen canvas for lighting (the BIG perf fix)
+let _lightingCanvas = null;
+let _lightingCtx    = null;
+
+const MAX_DIALOG_QUEUE = 25;
+
+const game = {
+    loop: 0, loopTime: 0, maxLoopTime: 600,
+    sanity: 100, maxSanity: 100,
+    inventory: [], cluesFound: [], journalEntries: [],
+    flags: {}, permanentFlags: {},
+    currentRoom: "foyer",
+    playerX: 400, playerY: 480, playerAngle: -Math.PI/2,
+    flashlightBattery: 100, flashlightOn: true,
+    interactTarget: null, endingReached: null,
+    ghostsActive: [],
+    xp: 0, level: 1, xpToNext: 50, totalXP: 0,
+    roomsExplored: 0, itemsFound: 0, ghostsSeen: 0,
+    missionsComplete: 0, activeMissions: [], completedMissions: [],
+};
+
+// ─── SAFE CALL HELPER ───────────────────────────────────────────
+function _safe(fn, ...args) {
+    if (typeof fn !== "function") return undefined;
+    try { return fn(...args); }
+    catch (e) { console.warn("Safe call error:", fn.name || "anon", e); return undefined; }
+}
+
+// ─── LEVEL / XP ─────────────────────────────────────────────────
+function giveXP(amount) {
+    if (!amount || amount <= 0) return;
+    game.xp      += amount;
+    game.totalXP += amount;
+    _safe(window.trackStat, "xp", amount);
+
+    // Cap per-call level-ups to prevent runaway recursion
+    let ups = 0;
+    while (game.xp >= game.xpToNext && ups < 5) {
+        game.xp -= game.xpToNext;
+        game.level++;
+        game.xpToNext = Math.floor(game.xpToNext * 1.4);
+        onLevelUp();
+        ups++;
+    }
+}
+
+function onLevelUp() {
+    if (_levelingUp) return;
+    _levelingUp = true;
+    try {
+        _safe(window.playSound, "levelup");
+        _safe(window.trackStat, "level", game.level);
+
+        game.maxSanity += 10;
+        game.sanity = Math.min(game.sanity + 20, game.maxSanity);
+
+        if (levelUpNotice) {
+            levelUpNotice.textContent = `⬆ LEVEL ${game.level}`;
+            levelUpNotice.style.opacity = "1";
+            if (_levelUpTimeout) clearTimeout(_levelUpTimeout);
+            _levelUpTimeout = setTimeout(() => {
+                levelUpNotice.style.opacity = "0";
+                _levelUpTimeout = null;
+            }, 2500);
+        }
+
+        _safe(window.emitLevelUpParticles, game.playerX, game.playerY);
+
+        if (game.level === 3)  { showDialog("SYSTEM","Level 3 — Upstairs unlocked."); game.flags.stairsUnlocked = true; }
+        if (game.level === 5)  showDialog("SYSTEM","Level 5 — Senses sharpen. More rooms accessible.");
+        if (game.level === 8)  showDialog("SYSTEM","Level 8 — Deep areas unlocked.");
+        if (game.level === 10) showDialog("SYSTEM","Level 10 — MASTER INVESTIGATOR.");
+
+        addClue(`level_${game.level}`, `Reached Level ${game.level}.`);
+    } finally {
+        _levelingUp = false;
+    }
+    // Defer mission check to next tick to break recursion chain
+    setTimeout(checkMissions, 0);
+}
+
+// ─── MISSIONS ───────────────────────────────────────────────────
+const ALL_MISSIONS = [
+    { id:"m_explore5",  name:"Explorer",      desc:"Visit 5 rooms",     check:()=>roomsVisited.size>=5,  xp:30 },
+    { id:"m_explore15", name:"Cartographer",  desc:"Visit 15 rooms",    check:()=>roomsVisited.size>=15, xp:60 },
+    { id:"m_explore25", name:"Every Corner",  desc:"Visit 25 rooms",    check:()=>roomsVisited.size>=25, xp:100 },
+    { id:"m_clue5",     name:"Curious Mind",  desc:"Find 5 clues",      check:()=>game.cluesFound.length>=5,  xp:25 },
+    { id:"m_clue15",    name:"Detective",     desc:"Find 15 clues",     check:()=>game.cluesFound.length>=15, xp:50 },
+    { id:"m_seal1",     name:"First Fragment",desc:"Find 1 seal",       check:()=>countSeals()>=1, xp:20 },
+    { id:"m_seal5",     name:"All Seals",     desc:"All 5 seals",       check:()=>countSeals()>=5, xp:80 },
+    { id:"m_loop2",     name:"Déjà Vu",       desc:"2 loops",           check:()=>game.loop>=2,    xp:20 },
+    { id:"m_loop5",     name:"Time Veteran",  desc:"5 loops",           check:()=>game.loop>=5,    xp:50 },
+    { id:"m_level5",    name:"Rising Power",  desc:"Level 5",           check:()=>game.level>=5,   xp:30 },
+    { id:"m_level10",   name:"Master",        desc:"Level 10",          check:()=>game.level>=10,  xp:60 },
+    { id:"m_truth",     name:"The Truth",     desc:"Discover truth",    check:()=>game.permanentFlags.knowTruth, xp:50 },
+    { id:"m_plan",      name:"Eleanora's Plan",desc:"Find the plan",    check:()=>game.permanentFlags.knowEleanoraPlan, xp:50 },
+    { id:"m_void",      name:"Face the Void", desc:"Enter Void Chamber",check:()=>roomsVisited.has("void_chamber"), xp:60 },
+];
+
+function checkMissions() {
+    if (_checkingMissions) return;
+    _checkingMissions = true;
+    const completed = [];
+    try {
+        for (let m of ALL_MISSIONS) {
+            if (game.completedMissions.includes(m.id)) continue;
+            try { if (m.check()) completed.push(m); }
+            catch (e) {}
+        }
+        // Mark ALL complete BEFORE awarding XP (prevents same-mission re-check loops)
+        for (let m of completed) {
+            game.completedMissions.push(m.id);
+            game.missionsComplete++;
+        }
+    } finally {
+        _checkingMissions = false;
+    }
+    // Now award XP and show dialogs (outside the guard)
+    for (let m of completed) {
+        showDialog("🏆 MISSION", `${m.name}: ${m.desc} (+${m.xp} XP)`);
+        giveXP(m.xp);
+    }
+}
+
+// ─── INVENTORY / CLUES ──────────────────────────────────────────
+function hasItem(id) { return game.inventory.some(i => i.id === id); }
+
+function addItem(id, icon, name) {
+    if (hasItem(id)) return;
+    game.inventory.push({ id, icon, name });
+    game.itemsFound++;
+    _safe(window.triggerMonologue, "found_item");
+    _safe(window.trackStat, "item_found", id);
+    _safe(window.playSound, "pickup");
+    updateInventoryUI();
+}
+
+function removeItem(id) {
+    game.inventory = game.inventory.filter(i => i.id !== id);
+    updateInventoryUI();
+}
+
+function countSeals() {
+    return [
+        game.permanentFlags.hasFirstSeal,  game.permanentFlags.hasSecondSeal,
+        game.permanentFlags.hasThirdSeal,  game.permanentFlags.hasFourthSeal,
+        game.permanentFlags.hasFifthSeal,
+    ].filter(Boolean).length;
+}
+
+function addClue(id, text) {
+    if (game.cluesFound.includes(id)) return;
+    game.cluesFound.push(id);
+    game.journalEntries.push({ loop: game.loop, text, id });
+    // Cap journal so it can't grow unbounded over hours of play
+    if (game.journalEntries.length > 500) game.journalEntries.shift();
+    _safe(window.triggerMonologue, "found_clue");
+    setTimeout(checkMissions, 0);
+}
+
+function updateInventoryUI() {
+    if (!inventoryEl) return;
+    inventoryEl.innerHTML = "";
+    inventoryEl.classList.remove("hidden");
+    for (let item of game.inventory) {
+        const div = document.createElement("div");
+        div.className = "inv-item";
+        div.innerHTML = `${item.icon}<span class="tooltip">${item.name}</span>`;
+        inventoryEl.appendChild(div);
+    }
+}
+
+// ─── DIALOG ─────────────────────────────────────────────────────
+window._gameShowDialog = null;
+window._gameShowDialogWithChoices = null;
+
+function showDialog(speaker, text, callback) {
+    if (!window._gameShowDialog) window._gameShowDialog = showDialog;
+    if (dialogQueue.length >= MAX_DIALOG_QUEUE) {
+        console.warn("Dialog queue full; dropping:", text);
+        return;
+    }
+    dialogQueue.push({ speaker, text, callback, choices: null });
+    if (!dialogActive) nextDialog();
+}
+
+function showDialogWithChoices(speaker, text, choices) {
+    if (!window._gameShowDialogWithChoices) window._gameShowDialogWithChoices = showDialogWithChoices;
+    if (dialogQueue.length >= MAX_DIALOG_QUEUE) return;
+    dialogQueue.push({ speaker, text, choices });
+    if (!dialogActive) nextDialog();
+}
+
+function nextDialog() {
+    if (dialogQueue.length === 0) {
+        dialogActive = false;
+        dialogBox.classList.add("hidden");
+        if (dialogCallback) {
+            const cb = dialogCallback;
+            dialogCallback = null;
+            try { cb(); } catch (e) { console.warn("Dialog callback error:", e); }
+        }
+        return;
+    }
+    dialogActive  = true;
+    currentDialog = dialogQueue.shift();
+    dialogBox.classList.remove("hidden");
+    dialogSpeaker.textContent = currentDialog.speaker;
+    dialogText.textContent    = "";
+    dialogChoices.innerHTML   = "";
+    dialogContinue.style.display = "none";
+
+    let i = 0;
+    const text = currentDialog.text;
+    const typeInterval = setInterval(() => {
+        if (i < text.length) { dialogText.textContent += text[i]; i++; }
+        else {
+            clearInterval(typeInterval);
+            currentDialog._typeInterval = null;
+            if (currentDialog.choices) showChoiceButtons(currentDialog.choices);
+            else { dialogContinue.style.display = "block"; dialogCallback = currentDialog.callback || null; }
+        }
+    }, 18);
+    currentDialog._typeInterval = typeInterval;
+    currentDialog._fullText     = text;
+}
+
+function showChoiceButtons(choices) {
+    dialogChoices.innerHTML = "";
+    choices.forEach((c, idx) => {
+        const div = document.createElement("div");
+        div.textContent = `${idx + 1}. ${c.text}`;
+        div.addEventListener("click", e => {
+            e.stopPropagation();
+            dialogActive = false; dialogBox.classList.add("hidden"); dialogQueue = [];
+            try { c.action(); } catch (err) { console.warn("Choice action error:", err); }
+        });
+        dialogChoices.appendChild(div);
+    });
+}
+
+function advanceDialog() {
+    if (!dialogActive) return;
+    if (currentDialog._typeInterval) {
+        clearInterval(currentDialog._typeInterval);
+        currentDialog._typeInterval = null;
+        dialogText.textContent = currentDialog._fullText;
+        if (currentDialog.choices) showChoiceButtons(currentDialog.choices);
+        else dialogContinue.style.display = "block";
+        return;
+    }
+    if (!currentDialog.choices) nextDialog();
+}
+
+function handleDialogKeys() {
+    if (!dialogActive) return false;
+    if (keysJustPressed["Space"] || keysJustPressed["Enter"] || keysJustPressed["KeyE"]) {
+        advanceDialog();
+        consumeKey("Space"); consumeKey("Enter"); consumeKey("KeyE");
+        return true;
+    }
+    if (currentDialog && currentDialog.choices && !currentDialog._typeInterval) {
+        for (let i = 0; i < currentDialog.choices.length; i++) {
+            if (keysJustPressed[`Digit${i + 1}`]) {
+                consumeKey(`Digit${i + 1}`);
+                dialogActive = false; dialogBox.classList.add("hidden"); dialogQueue = [];
+                try { currentDialog.choices[i].action(); }
+                catch (err) { console.warn("Choice key action error:", err); }
+                return true;
+            }
+        }
+    }
+    if (keysJustPressed["Escape"]) {
+        consumeKey("Escape");
+        dialogActive = false; dialogBox.classList.add("hidden"); dialogQueue = [];
+    }
+    return true;
+}
+
+// ─── ROOM MANAGEMENT ────────────────────────────────────────────
+function changeRoom(roomId) {
+    const room = ROOMS[roomId];
+    if (!room) return;
+    const fromRoom = game.currentRoom;
+    transitionState = "fadeOut";
+    transitionAlpha = 0;
+    transitionCallback = () => {
+        game.currentRoom = roomId;
+        const spawn = (typeof getSpawnForRoom === "function")
+            ? getSpawnForRoom(roomId, fromRoom)
+            : { x: room.width / 2, y: room.height / 2 };
+        game.playerX = spawn.x;
+        game.playerY = spawn.y;
+
+        if (!roomsVisited.has(roomId)) {
+            roomsVisited.add(roomId);
+            game.roomsExplored++;
+            giveXP(5);
+            _safe(window.triggerMonologue, "new_room");
+            _safe(window.trackStat, "room_visit", roomId);
+            _safe(window.storyAction, "room_entered", { room: roomId });
+            setTimeout(checkMissions, 0);
+        }
+        _safe(window.playSound, "door");
+        _safe(window.setupWeatherForRoom, roomId);
+        if (typeof AudioManager !== "undefined" && AudioManager.initialized) AudioManager.update(roomId);
+    };
+}
+
+function getCurrentRoom() { return ROOMS[game.currentRoom]; }
+
+// ─── PLAYER ─────────────────────────────────────────────────────
+function updatePlayer() {
+    if (handleDialogKeys()) return;
+    if (dialogActive) return;
+
+    if (keysJustPressed["KeyJ"] || keysJustPressed["Tab"]) {
+        toggleJournal();
+        consumeKey("KeyJ"); consumeKey("Tab");
+        return;
+    }
+    if (journalOpen) {
+        if (keysJustPressed["Escape"]) {
+            journalEl.classList.add("hidden"); journalOpen = false;
+            consumeKey("Escape");
+        }
+        return;
+    }
+    if (transitionState !== "none") return;
+    if (typeof combat !== "undefined" && combat.dodgeActive) return;
+
+    // ─── U KEY: Smart unstuck — tries multiple positions ────────
+    if (keysJustPressed["KeyU"]) {
+        consumeKey("KeyU");
+        const room = getCurrentRoom();
+        const passTypes = ["rug","runner_rug","pentagram","candle_circle","bones","fence"];
+
+        // Try several candidate positions until one is clear
+        const candidates = [
+            { x: room.width / 2,        y: room.height / 2 },          // center
+            { x: room.width / 2,        y: room.height - 80 },         // bottom-center
+            { x: room.width / 2,        y: 80 },                       // top-center
+            { x: 80,                    y: room.height / 2 },          // left-center
+            { x: room.width - 80,       y: room.height / 2 },          // right-center
+            { x: room.width / 4,        y: room.height / 4 },          // top-left quad
+            { x: 3 * room.width / 4,    y: room.height / 4 },          // top-right quad
+            { x: room.width / 4,        y: 3 * room.height / 4 },      // bottom-left quad
+            { x: 3 * room.width / 4,    y: 3 * room.height / 4 },      // bottom-right quad
+        ];
+
+        let chosen = null;
+        for (const c of candidates) {
+            let blocked = false;
+            for (const f of room.furniture) {
+                if (passTypes.includes(f.type)) continue;
+                const hw = f.w / 2 + 20, hh = f.h / 2 + 20;
+                if (c.x > f.x - hw && c.x < f.x + hw &&
+                    c.y > f.y - hh && c.y < f.y + hh) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (!blocked) { chosen = c; break; }
+        }
+
+        // Fallback: just use center even if blocked (better than nothing)
+        if (!chosen) chosen = { x: room.width / 2, y: room.height / 2 };
+
+        game.playerX = chosen.x;
+        game.playerY = chosen.y;
+        _safe(window.trackStat, "unstuck");
+
+        // Use a subtitle instead of dialog (non-blocking)
+        if (typeof SubtitleSystem !== "undefined" && SubtitleSystem.show) {
+            SubtitleSystem.show("SYSTEM", "Repositioned to safe spot.", 2000);
+        } else {
+            showDialog("SYSTEM", "Repositioned to safe spot.");
+        }
+        return;
+    }
+
+    const room  = getCurrentRoom();
+    const speed = 3;
+    let dx = 0, dy = 0;
+    if (keys["ArrowLeft"]  || keys["KeyA"]) dx = -1;
+    if (keys["ArrowRight"] || keys["KeyD"]) dx =  1;
+    if (keys["ArrowUp"]    || keys["KeyW"]) dy = -1;
+    if (keys["ArrowDown"]  || keys["KeyS"]) dy =  1;
+    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+
+    const nx = game.playerX + dx * speed;
+    const ny = game.playerY + dy * speed;
+
+    const passTypes = ["rug","runner_rug","pentagram","candle_circle","bones","fence"];
+    let canX = true, canY = true;
+    for (let f of room.furniture) {
+        if (passTypes.includes(f.type)) continue;
+        const hw = f.w / 2 + 12, hh = f.h / 2 + 12;
+        if (nx > f.x - hw && nx < f.x + hw && game.playerY > f.y - hh && game.playerY < f.y + hh) canX = false;
+        if (game.playerX > f.x - hw && game.playerX < f.x + hw && ny > f.y - hh && ny < f.y + hh) canY = false;
+    }
+    if (canX) game.playerX = Math.max(30, Math.min(room.width  - 30, nx));
+    if (canY) game.playerY = Math.max(30, Math.min(room.height - 30, ny));
+
+    if (dx !== 0 || dy !== 0) {
+        game.playerAngle = Math.atan2(dy, dx);
+        stepTimer++;
+        if (stepTimer % 20 === 0) {
+            if (typeof AudioWiring !== "undefined" && AudioWiring.playFootstep) AudioWiring.playFootstep();
+            else _safe(window.playSound, "step");
+        }
+        _safe(window.trackFootprints, game.playerX, game.playerY, game.playerAngle, true);
+    }
+
+    // Flashlight battery — owned by Balance.js if available
+    if (game.flashlightOn) {
+        if (typeof BALANCE_HANDLES_FLASHLIGHT === "undefined" || !BALANCE_HANDLES_FLASHLIGHT) {
+            game.flashlightBattery -= 0.006;
+        }
+        if (game.flashlightBattery < 0) game.flashlightBattery = 0;
+    }
+    if (keysJustPressed["KeyF"]) {
+        if (game.flashlightBattery > 0) game.flashlightOn = !game.flashlightOn;
+        else game.flashlightOn = false;
+        consumeKey("KeyF");
+    }
+    if (keysJustPressed["KeyR"] && hasItem("battery")) {
+        game.flashlightBattery = Math.min(100, game.flashlightBattery + 50);
+        game.flashlightOn = true;
+        removeItem("battery"); consumeKey("KeyR");
+    }
+
+    if (keysJustPressed["KeyE"] || keysJustPressed["Space"]) {
+        interact();
+        consumeKey("KeyE"); consumeKey("Space");
+    }
+
+    if (keysJustPressed["KeyQ"]) {
+        if (typeof combat !== "undefined" && combat.attackCooldown <= 0) {
+            _safe(window.performAttack);
+        }
+        consumeKey("KeyQ");
+    }
+
+    if (keysJustPressed["KeyM"]) { toggleJournal(); consumeKey("KeyM"); }
+
+    // Find nearest interactable
+    game.interactTarget = null;
+    let closestDist = 65;
+
+    for (let obj of room.interactables) {
+        if (obj.condition && !obj.condition()) continue;
+        const d = Math.hypot(game.playerX - obj.x, game.playerY - obj.y);
+        if (d < closestDist) { closestDist = d; game.interactTarget = obj; }
+    }
+    for (let door of room.doors) {
+        if (door.condition && !door.condition()) continue;
+        const cx = door.x + door.w / 2, cy = door.y + door.h / 2;
+        const d = Math.hypot(game.playerX - cx, game.playerY - cy);
+        if (d < closestDist) { closestDist = d; game.interactTarget = { ...door, isDoor: true }; }
+    }
+}
+
+function interact() {
+    if (typeof Balance !== "undefined" && Balance.canInteract && !Balance.canInteract()) return;
+    if (typeof getNearestNPC === "function") {
+        const npc = getNearestNPC();
+        if (npc && npc.getInteractDistance() < 65) { npc.interact(); return; }
+    }
+    if (!game.interactTarget) return;
+    if (game.interactTarget.isDoor) changeRoom(game.interactTarget.targetRoom);
+    else try { game.interactTarget.action(); } catch (e) { console.warn("Interact error:", e); }
+}
+
+function toggleJournal() {
+    journalOpen = !journalOpen;
+    if (!journalOpen) { journalEl.classList.add("hidden"); return; }
+
+    journalEl.classList.remove("hidden");
+    journalContent.innerHTML = "";
+
+    const stats = document.createElement("div");
+    stats.className = "journal-entry";
+    stats.innerHTML = `<div class="journal-clue">
+        📊 Level ${game.level} | XP: ${game.xp}/${game.xpToNext} | Loop #${game.loop + 1}<br>
+        🔮 Seals: ${countSeals()}/5 | 📍 Rooms: ${roomsVisited.size}/30 | 🏆 ${game.completedMissions.length}
+    </div>`;
+    journalContent.appendChild(stats);
+
+    const missDiv = document.createElement("div");
+    missDiv.className = "journal-entry";
+    let mHTML = '<div class="journal-loop">ACTIVE MISSIONS</div>';
+    const active = ALL_MISSIONS.filter(m => !game.completedMissions.includes(m.id));
+    if (!active.length) mHTML += '<div class="journal-clue">All complete! 🎉</div>';
+    else active.slice(0, 5).forEach(m => { mHTML += `<div class="journal-clue">• ${m.name}: ${m.desc}</div>`; });
+    missDiv.innerHTML = mHTML;
+    journalContent.appendChild(missDiv);
+
+    if (typeof getQuestLogHTML === "function") {
+        const qd = document.createElement("div"); qd.innerHTML = getQuestLogHTML();
+        journalContent.appendChild(qd);
+    }
+    if (typeof getStatsHTML === "function") {
+        const sd = document.createElement("div"); sd.innerHTML = getStatsHTML();
+        journalContent.appendChild(sd);
+    }
+
+    if (!game.journalEntries.length) {
+        const e = document.createElement("div"); e.className = "journal-entry";
+        e.innerHTML = '<div class="journal-clue">No clues yet. Explore!</div>';
+        journalContent.appendChild(e);
+    } else {
+        for (let i = game.journalEntries.length - 1; i >= 0; i--) {
+            const entry = game.journalEntries[i];
+            const div = document.createElement("div");
+            div.className = "journal-entry";
+            div.innerHTML = `<div class="journal-loop">Loop #${entry.loop + 1}</div>
+                             <div class="journal-clue">${entry.text}</div>`;
+            journalContent.appendChild(div);
+        }
+    }
+}
+
+// ─── RENDERING ──────────────────────────────────────────────────
+function render() {
+    const room = getCurrentRoom();
+    const cw = canvas.width, ch = canvas.height;
+
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, cw, ch);
+
+    if (typeof Camera !== "undefined" && Camera.update) Camera.update(game.playerX, game.playerY, game.currentRoom);
+    const camData = (typeof Camera !== "undefined" && Camera.getTransform)
+        ? Camera.getTransform(cw, ch, room.width, room.height) : null;
+    const scale = camData ? camData.scale : Math.min(cw / room.width, ch / room.height) * 0.82;
+    const shake = (typeof getShakeOffset === "function") ? getShakeOffset() : { x: 0, y: 0 };
+    const camX = camData ? camData.camX + shake.x : cw / 2 - game.playerX * scale + shake.x;
+    const camY = camData ? camData.camY + shake.y : ch / 2 - game.playerY * scale + shake.y;
+
+    ctx.save();
+    ctx.translate(camX, camY);
+    ctx.scale(scale, scale);
+    if (camData && camData.angle) {
+        ctx.translate(room.width / 2, room.height / 2);
+        ctx.rotate(camData.angle);
+        ctx.translate(-room.width / 2, -room.height / 2);
+    }
+
+    // Floor
+    ctx.fillStyle = room.floorColor;
+    ctx.fillRect(0, 0, room.width, room.height);
+
+    // Grid
+    ctx.strokeStyle = "rgba(255,255,255,0.02)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < room.width;  x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, room.height); ctx.stroke(); }
+    for (let y = 0; y < room.height; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(room.width,  y); ctx.stroke(); }
+
+    // Walls
+    ctx.fillStyle = room.wallColor;
+    ctx.fillRect(0, 0, room.width, 20);
+    ctx.fillRect(0, 0, 20, room.height);
+    ctx.fillRect(room.width - 20, 0, 20, room.height);
+    ctx.fillRect(0, room.height - 20, room.width, 20);
+
+    drawFurniture(room);
+    if (typeof HouseDecay !== "undefined") {
+        if (HouseDecay.drawCracks)       HouseDecay.drawCracks(ctx, game.currentRoom);
+        if (HouseDecay.drawDecayOverlay) HouseDecay.drawDecayOverlay(ctx, room, game.currentRoom);
+    }
+    drawDoors(room);
+    drawInteractables(room);
+    drawGhosts(room);
+    drawPlayer();
+    if (typeof DeathMemories !== "undefined" && DeathMemories.draw) DeathMemories.draw(ctx, game.currentRoom);
+
+    if (typeof drawParticles === "function") drawParticles(ctx);
+    if (typeof drawCombat    === "function") drawCombat(ctx);
+    if (typeof drawNPCs      === "function") drawNPCs(ctx);
+    if (typeof SetPieces !== "undefined" && SetPieces.draw) SetPieces.draw(ctx);
+
+    drawLighting(room);
+    ctx.restore();
+
+    drawSanityEffects();
+    if (typeof SetPieces !== "undefined" && SetPieces.drawOverlay) SetPieces.drawOverlay(ctx, canvas.width, canvas.height);
+    drawHUD();
+    drawInteractPrompt();
+
+    if (typeof drawCombatHUD === "function") drawCombatHUD(ctx, cw, ch);
+
+    drawTransition();
+
+    if (typeof drawAchievementNotification === "function") drawAchievementNotification(ctx, cw, ch);
+    if (typeof SubtitleSystem !== "undefined" && SubtitleSystem.draw) SubtitleSystem.draw(ctx, cw, ch);
+
+    if (typeof Monologue !== "undefined" && Monologue.draw) Monologue.draw(ctx, canvas.width, canvas.height);
+    drawMinimap();
+}
+
+// ─── FURNITURE ──────────────────────────────────────────────────
+function drawFurniture(room) {
+    for (let f of room.furniture) {
+        ctx.save();
+        ctx.translate(f.x, f.y);
+        switch (f.type) {
+            case "chandelier":
+                ctx.fillStyle = "#2a2018";
+                ctx.fillRect(-f.w / 2, -5, f.w, 10);
+                for (let i = -3; i <= 3; i++) {
+                    ctx.fillStyle = "#ffcc44";
+                    ctx.globalAlpha = 0.3 + Math.sin(frame * 0.05 + i) * 0.2;
+                    ctx.beginPath(); ctx.arc(i * 12, 8, 3, 0, Math.PI * 2); ctx.fill();
+                }
+                ctx.globalAlpha = 1; break;
+            case "table": case "desk": case "longtable": case "nightstand": case "counter":
+                ctx.fillStyle = "#2a1a10";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.strokeStyle = "#1a0e06"; ctx.lineWidth = 2;
+                ctx.strokeRect(-f.w / 2, -f.h / 2, f.w, f.h); break;
+            case "chair": case "bench": case "pew": case "rocking_chair":
+                ctx.fillStyle = "#221510";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h); break;
+            case "bookshelf": case "wine_rack":
+                ctx.fillStyle = "#1a1208";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                for (let y = -f.h / 2 + 8; y < f.h / 2 - 5; y += 18) {
+                    ctx.fillStyle = ["#3a1a10","#2a2a10","#1a2a1a","#2a1a2a"][(y * 7) & 3];
+                    ctx.fillRect(-f.w / 2 + 3, y, f.w - 6, 13);
+                } break;
+            case "bed": case "cot": case "crib":
+                ctx.fillStyle = "#1a1520";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = "#2a2030";
+                ctx.fillRect(-f.w / 2 + 4, -f.h / 2 + 4, f.w - 8, f.h - 8); break;
+            case "mirror":
+                ctx.fillStyle = "#1a2030";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = `rgba(100,150,200,${0.1 + Math.sin(frame * 0.02) * 0.05})`;
+                ctx.fillRect(-f.w / 2 + 3, -f.h / 2 + 3, f.w - 6, f.h - 6); break;
+            case "rug": case "runner_rug":
+                ctx.fillStyle = "rgba(60,20,20,0.3)";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h); break;
+            case "stairs":
+                ctx.fillStyle = "#1a1510";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                for (let i = 0; i < 5; i++) {
+                    ctx.fillStyle = "#221a12";
+                    ctx.fillRect(-f.w / 2, -f.h / 2 + i * (f.h / 5), f.w, f.h / 5 - 2);
+                } break;
+            case "fireplace": case "furnace":
+                ctx.fillStyle = "#1a1210";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = game.flags.fireLit && f.type === "fireplace" ? "#442200" : "#0a0a0a";
+                ctx.fillRect(-f.w / 2 + 8, -f.h / 2 + 8, f.w - 16, f.h - 8);
+                if (game.flags.fireLit && f.type === "fireplace") {
+                    ctx.fillStyle = `rgba(255,150,30,${0.3 + Math.sin(frame * 0.1) * 0.15})`;
+                    ctx.beginPath(); ctx.arc(0, 0, 25, 0, Math.PI * 2); ctx.fill();
+                } break;
+            case "clock":
+                ctx.fillStyle = "#1a1510";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = "#221a12";
+                ctx.beginPath(); ctx.arc(0, -f.h / 4, 12, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "#aa9977"; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(0, -f.h / 4); ctx.lineTo(0, -f.h / 4 - 8); ctx.stroke(); break;
+            case "pentagram":
+                ctx.strokeStyle = `rgba(150,0,0,${0.3 + Math.sin(frame * 0.03) * 0.15})`;
+                ctx.lineWidth = 2; ctx.beginPath();
+                for (let i = 0; i < 5; i++) {
+                    const a = (i * 4 * Math.PI / 5) - Math.PI / 2;
+                    i === 0 ? ctx.moveTo(Math.cos(a) * f.w / 2, Math.sin(a) * f.h / 2)
+                            : ctx.lineTo(Math.cos(a) * f.w / 2, Math.sin(a) * f.h / 2);
+                }
+                ctx.closePath(); ctx.stroke(); break;
+            case "altar":
+                ctx.fillStyle = "#1a0a0a";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = `rgba(100,0,0,${0.2 + Math.sin(frame * 0.04) * 0.1})`;
+                ctx.fillRect(-f.w / 2, -2, f.w, 4); break;
+            case "candle_circle":
+                for (let i = 0; i < 8; i++) {
+                    const a = (i / 8) * Math.PI * 2;
+                    ctx.fillStyle = `rgba(255,200,100,${0.2 + Math.sin(frame * 0.06 + i) * 0.15})`;
+                    ctx.beginPath(); ctx.arc(Math.cos(a) * f.w / 2, Math.sin(a) * f.h / 2, 4, 0, Math.PI * 2); ctx.fill();
+                } break;
+            case "pillar":
+                ctx.fillStyle = "#1a1a18";
+                ctx.beginPath(); ctx.arc(0, 0, f.w / 2, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "#222220"; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(0, 0, f.w / 2, 0, Math.PI * 2); ctx.stroke(); break;
+            case "sofa":
+                ctx.fillStyle = "#201520";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+                ctx.fillStyle = "#2a1a2a";
+                ctx.fillRect(-f.w / 2 + 4, -f.h / 2 + 4, f.w - 8, f.h - 12); break;
+            case "fountain": case "well":
+                ctx.fillStyle = "#151520";
+                ctx.beginPath(); ctx.arc(0, 0, f.w / 2, 0, Math.PI * 2); ctx.fill();
+                ctx.strokeStyle = "#252530"; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(0, 0, f.w / 2, 0, Math.PI * 2); ctx.stroke(); break;
+            case "tree":
+                ctx.fillStyle = "#0a1a0a";
+                ctx.beginPath(); ctx.arc(0, -10, f.w / 2 + 5, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "#1a1008";
+                ctx.fillRect(-4, -5, 8, f.h / 2 + 5); break;
+            case "hedge":
+                ctx.fillStyle = "#0a1808";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h); break;
+            case "chains":
+                ctx.strokeStyle = "#333"; ctx.lineWidth = 3;
+                for (let yy = -f.h / 2; yy < f.h / 2; yy += 10) {
+                    ctx.beginPath(); ctx.arc(Math.sin(yy * 0.5) * 5, yy, 4, 0, Math.PI * 2); ctx.stroke();
+                } break;
+            case "gear":
+                ctx.strokeStyle = "#2a2820"; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.arc(0, 0, f.w / 2, 0, Math.PI * 2); ctx.stroke();
+                for (let i = 0; i < 8; i++) {
+                    const ga = (i / 8) * Math.PI * 2 + frame * 0.01;
+                    ctx.beginPath();
+                    ctx.moveTo(Math.cos(ga) * f.w / 2 * 0.7, Math.sin(ga) * f.h / 2 * 0.7);
+                    ctx.lineTo(Math.cos(ga) * f.w / 2 * 1.2, Math.sin(ga) * f.h / 2 * 1.2);
+                    ctx.stroke();
+                } break;
+            case "pendulum": {
+                const pa = Math.sin(frame * 0.03) * 0.3;
+                ctx.save(); ctx.rotate(pa);
+                ctx.strokeStyle = "#2a2820"; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(0, -f.h / 2); ctx.lineTo(0, f.h / 2); ctx.stroke();
+                ctx.fillStyle = "#3a3830";
+                ctx.beginPath(); ctx.arc(0, f.h / 2, 10, 0, Math.PI * 2); ctx.fill();
+                ctx.restore(); break;
+            }
+            case "bell":
+                ctx.fillStyle = "#2a2820";
+                ctx.beginPath();
+                ctx.moveTo(-f.w / 2, f.h / 2);
+                ctx.quadraticCurveTo(-f.w / 2, -f.h / 2, 0, -f.h / 2);
+                ctx.quadraticCurveTo(f.w / 2, -f.h / 2, f.w / 2, f.h / 2);
+                ctx.closePath(); ctx.fill(); break;
+            default:
+                ctx.fillStyle = "#1a1a1a";
+                ctx.fillRect(-f.w / 2, -f.h / 2, f.w, f.h);
+        }
+        ctx.restore();
+    }
+}
+
+function drawDoors(room) {
+    for (let d of room.doors) {
+        if (d.condition && !d.condition()) continue;
+        ctx.fillStyle = "#2a1a0a";
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+        ctx.strokeStyle = "#3a2a1a"; ctx.lineWidth = 2;
+        ctx.strokeRect(d.x, d.y, d.w, d.h);
+        const cx = d.x + d.w / 2, cy = d.y + d.h / 2;
+        const dist = Math.hypot(game.playerX - cx, game.playerY - cy);
+        if (dist < 75) {
+            ctx.fillStyle = `rgba(255,200,100,${0.12 * (1 - dist / 75)})`;
+            ctx.fillRect(d.x - 6, d.y - 6, d.w + 12, d.h + 12);
+        }
+    }
+}
+
+function drawInteractables(room) {
+    for (let obj of room.interactables) {
+        if (obj.condition && !obj.condition()) continue;
+        const dist = Math.hypot(game.playerX - obj.x, game.playerY - obj.y);
+        ctx.globalAlpha = (dist < 65 ? 0.9 : 0.45) + Math.sin(frame * 0.05) * 0.1;
+        ctx.font = "20px Arial"; ctx.textAlign = "center";
+        ctx.fillText(obj.icon, obj.x, obj.y + 7);
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawGhosts(room) {
+    if (!room.ghosts) return;
+    for (let g of room.ghosts) {
+        if (game.loop < g.appearsAfterLoop) continue;
+        const t = frame * 0.02;
+        const alpha = 0.15 + Math.sin(t + g.x) * 0.1;
+        const bobY = Math.sin(t * 1.5) * 5;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(g.x, g.y + bobY);
+        const colors = { entity:"#2a0040", victor:"#402020", eleanora:"#204060",
+                         ancient:"#303020", deep_one:"#102040", doppelganger:"#404040" };
+        ctx.fillStyle = colors[g.type] || "#303050";
+        ctx.beginPath(); ctx.ellipse(0, 0, 15, 25, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = (g.type === "entity" || g.type === "deep_one") ? "#ff0000" : "#aaccff";
+        ctx.beginPath(); ctx.arc(-5, -8, 2, 0, Math.PI * 2); ctx.arc(5, -8, 2, 0, Math.PI * 2); ctx.fill();
+        for (let i = -2; i <= 2; i++) {
+            ctx.beginPath(); ctx.moveTo(i * 6, 20); ctx.lineTo(i * 6 + Math.sin(t + i) * 5, 35);
+            ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 3; ctx.stroke();
+        }
+        ctx.restore();
+        const dist = Math.hypot(game.playerX - g.x, game.playerY - g.y);
+        if (dist < 80) {
+            const drain = (typeof Balance !== "undefined" && Balance.getGhostDrainRate)
+                ? Balance.getGhostDrainRate(g.type) : 0.02;
+            game.sanity -= drain;
+            if (dist < 50 && frame % 300 === 0) _safe(window.playSound, "ghost");
+        }
+    }
+}
+
+function drawPlayer() {
+    ctx.save();
+    ctx.translate(game.playerX, game.playerY);
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath(); ctx.ellipse(0, 10, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#445566";
+    ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ddc8a0";
+    ctx.beginPath(); ctx.arc(0, -8, 6, 0, Math.PI * 2); ctx.fill();
+    if (game.flashlightOn && game.flashlightBattery > 0) {
+        ctx.strokeStyle = "#ffdd88"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(game.playerAngle) * 8,  Math.sin(game.playerAngle) * 8);
+        ctx.lineTo(Math.cos(game.playerAngle) * 16, Math.sin(game.playerAngle) * 16);
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+// ─── LIGHTING (REUSED OFFSCREEN CANVAS) ─────────────────────────
+function drawLighting(room) {
+    if (!_lightingCanvas) {
+        _lightingCanvas = document.createElement("canvas");
+        _lightingCtx    = _lightingCanvas.getContext("2d");
+    }
+    if (_lightingCanvas.width !== room.width || _lightingCanvas.height !== room.height) {
+        _lightingCanvas.width  = room.width;
+        _lightingCanvas.height = room.height;
+    }
+    const dc   = _lightingCanvas;
+    const dCtx = _lightingCtx;
+
+    dCtx.globalCompositeOperation = "source-over";
+    dCtx.clearRect(0, 0, room.width, room.height);
+
+    const candleBoost = hasItem("blessed_candle") ? 0.08 : 0;
+    const baseAmbient = Math.min(0.6, room.ambientLight + 0.15 + candleBoost);
+    dCtx.fillStyle = `rgba(0,0,0,${1 - baseAmbient})`;
+    dCtx.fillRect(0, 0, room.width, room.height);
+
+    dCtx.globalCompositeOperation = "destination-out";
+
+    if (game.flashlightOn && game.flashlightBattery > 0) {
+        const batteryFactor = game.flashlightBattery / 100;
+        let flickerMod = 0;
+        if (game.flashlightBattery < 20) flickerMod = Math.sin(frame * 0.3) * 0.15 * (1 - batteryFactor);
+
+        const range      = 160 + batteryFactor * 280;
+        const brightness = 0.65 + batteryFactor * 0.35 - flickerMod;
+        const coneAngle  = 0.6 + batteryFactor * 0.25;
+
+        const flX = game.playerX + Math.cos(game.playerAngle) * 25;
+        const flY = game.playerY + Math.sin(game.playerAngle) * 25;
+
+        const grad = dCtx.createRadialGradient(flX, flY, 0, flX, flY, range);
+        grad.addColorStop(0,   `rgba(0,0,0,${brightness})`);
+        grad.addColorStop(0.4, `rgba(0,0,0,${brightness * 0.7})`);
+        grad.addColorStop(0.7, `rgba(0,0,0,${brightness * 0.3})`);
+        grad.addColorStop(1,   "rgba(0,0,0,0)");
+        dCtx.fillStyle = grad;
+        dCtx.beginPath();
+        dCtx.moveTo(game.playerX, game.playerY);
+        dCtx.arc(game.playerX, game.playerY, range,
+                 game.playerAngle - coneAngle, game.playerAngle + coneAngle);
+        dCtx.closePath();
+        dCtx.fill();
+
+        const pg = dCtx.createRadialGradient(game.playerX, game.playerY, 0, game.playerX, game.playerY, 55);
+        pg.addColorStop(0, `rgba(0,0,0,${0.5 + batteryFactor * 0.3})`);
+        pg.addColorStop(1, "rgba(0,0,0,0)");
+        dCtx.fillStyle = pg;
+        dCtx.beginPath(); dCtx.arc(game.playerX, game.playerY, 55, 0, Math.PI * 2); dCtx.fill();
+    } else {
+        const pg = dCtx.createRadialGradient(game.playerX, game.playerY, 0, game.playerX, game.playerY, 50);
+        pg.addColorStop(0, "rgba(0,0,0,0.6)");
+        pg.addColorStop(1, "rgba(0,0,0,0)");
+        dCtx.fillStyle = pg;
+        dCtx.beginPath(); dCtx.arc(game.playerX, game.playerY, 50, 0, Math.PI * 2); dCtx.fill();
+    }
+
+    if (game.flags.fireLit && game.currentRoom === "library") {
+        const fg = dCtx.createRadialGradient(300, 50, 0, 300, 50, 140);
+        fg.addColorStop(0, "rgba(0,0,0,0.6)"); fg.addColorStop(1, "rgba(0,0,0,0)");
+        dCtx.fillStyle = fg; dCtx.beginPath(); dCtx.arc(300, 50, 140, 0, Math.PI * 2); dCtx.fill();
+    }
+    if (game.flags.candlesLit && game.currentRoom === "dining_room") {
+        const cg = dCtx.createRadialGradient(350, 250, 0, 350, 250, 120);
+        cg.addColorStop(0, "rgba(0,0,0,0.5)"); cg.addColorStop(1, "rgba(0,0,0,0)");
+        dCtx.fillStyle = cg; dCtx.beginPath(); dCtx.arc(350, 250, 120, 0, Math.PI * 2); dCtx.fill();
+    }
+
+    ctx.drawImage(dc, 0, 0);
+}
+
+// ─── SANITY OVERLAY ─────────────────────────────────────────────
+function drawSanityEffects() {
+    const s = game.sanity;
+    const vigStrength = 0.25 + (1 - s / game.maxSanity) * 0.45;
+    const vig = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, canvas.width * 0.3,
+                                          canvas.width / 2, canvas.height / 2, canvas.width * 0.7);
+    vig.addColorStop(0, "rgba(0,0,0,0)");
+    vig.addColorStop(1, `rgba(0,0,0,${vigStrength})`);
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (s < 50) { ctx.fillStyle = `rgba(50,0,0,${(50 - s) / 500})`; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    if (s < 30 && Math.random() < 0.005) {
+        ctx.fillStyle = "rgba(80,0,0,0.1)";
+        ctx.font = `${20 + Math.random() * 20}px Georgia`;
+        ctx.textAlign = "center";
+        ctx.fillText(["HELP","FIND ME","LOOP","TRAPPED","AZATHIEL"][Math.floor(Math.random() * 5)],
+                     Math.random() * canvas.width, Math.random() * canvas.height);
+    }
+    if (s < 15) {
+        ctx.fillStyle = `rgba(30,0,0,${0.05 + Math.sin(frame * 0.1) * 0.03})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (frame % 120 === 0) _safe(window.playSound, "heartbeat");
+    }
+}
+
+// ─── HUD ────────────────────────────────────────────────────────
+function drawHUD() {
+    const cw = canvas.width, ch = canvas.height, p = 15;
+    const room = getCurrentRoom();
+
+    ctx.fillStyle = "rgba(200,200,200,0.6)"; ctx.font = "16px Georgia"; ctx.textAlign = "left";
+    ctx.fillText(room.name, p, p + 16);
+
+    ctx.fillStyle = "rgba(150,100,100,0.6)"; ctx.font = "12px 'Courier New'";
+    ctx.fillText(`Loop #${game.loop + 1} | Lv.${game.level}`, p, p + 36);
+
+    ctx.fillStyle = "rgba(30,30,30,0.6)"; ctx.fillRect(p, p + 42, 100, 5);
+    ctx.fillStyle = "rgba(100,150,255,0.6)"; ctx.fillRect(p, p + 42, 100 * (game.xp / game.xpToNext), 5);
+    ctx.fillStyle = "rgba(150,150,200,0.4)"; ctx.font = "9px 'Courier New'";
+    ctx.fillText(`XP ${game.xp}/${game.xpToNext}`, p, p + 56);
+
+    const timeLeft = Math.max(0, game.maxLoopTime - game.loopTime);
+    const min = Math.floor(timeLeft / 60), sec = Math.floor(timeLeft % 60);
+    ctx.fillStyle = timeLeft < 60 ? `rgba(255,50,50,${0.6 + Math.sin(frame * 0.1) * 0.3})` : "rgba(200,200,200,0.5)";
+    ctx.font = "22px 'Courier New'"; ctx.textAlign = "center";
+    ctx.fillText(`${min}:${sec.toString().padStart(2, "0")}`, cw / 2, p + 20);
+    ctx.font = "10px 'Courier New'"; ctx.fillStyle = "rgba(150,150,150,0.4)";
+    ctx.fillText("TIME UNTIL RESET", cw / 2, p + 34);
+
+    const sW = 120, sX = cw - sW - p, sY = p + 10;
+    ctx.fillStyle = "rgba(30,30,30,0.6)"; ctx.fillRect(sX, sY, sW, 8);
+    const sp = game.sanity / game.maxSanity;
+    ctx.fillStyle = sp > 0.5 ? "rgba(100,200,100,0.6)" : sp > 0.25 ? "rgba(200,200,50,0.6)" : "rgba(200,50,50,0.6)";
+    ctx.fillRect(sX, sY, sW * sp, 8);
+    ctx.fillStyle = "rgba(200,200,200,0.4)"; ctx.font = "10px 'Courier New'"; ctx.textAlign = "right";
+    ctx.fillText(`SANITY ${Math.floor(game.sanity)}/${game.maxSanity}`, cw - p, sY - 2);
+
+    const fX = cw - 80 - p, fY = sY + 22;
+    ctx.fillStyle = "rgba(30,30,30,0.6)"; ctx.fillRect(fX, fY, 80, 6);
+    ctx.fillStyle = game.flashlightOn ? "rgba(255,220,100,0.6)" : "rgba(100,100,100,0.4)";
+    ctx.fillRect(fX, fY, 80 * (game.flashlightBattery / 100), 6);
+    ctx.fillText(game.flashlightOn ? "🔦 ON [F]" : "🔦 OFF [F]", cw - p, fY - 2);
+
+    if (typeof combat !== "undefined" && typeof WEAPONS !== "undefined") {
+        const wpn = WEAPONS[combat.equippedWeapon] || WEAPONS.fists;
+        ctx.fillStyle = "rgba(200,180,100,0.5)"; ctx.font = "11px 'Courier New'"; ctx.textAlign = "left";
+        ctx.fillText(`${wpn.icon} ${wpn.name} [Q]`, p, ch - p - 16);
+    }
+
+    ctx.fillStyle = "rgba(150,120,80,0.5)"; ctx.font = "11px 'Courier New'"; ctx.textAlign = "left";
+    ctx.fillText(`Clues:${game.cluesFound.length} Seals:${countSeals()}/5 Rooms:${roomsVisited.size}/30 🏆${game.completedMissions.length}`, p, ch - p);
+    ctx.fillStyle = "rgba(100,100,100,0.3)"; ctx.font = "10px 'Courier New'"; ctx.textAlign = "right";
+    ctx.fillText("WASD:Move E:Interact Q:Attack Shift:Dodge F:Flash J:Journal U:Unstuck", cw - p, ch - p);
+}
+
+function drawInteractPrompt() {
+    if (dialogActive || journalOpen) return;
+    if (typeof getNearestNPC === "function") {
+        const npc = getNearestNPC();
+        if (npc && npc.getInteractDistance() < 65) {
+            const q = npc.getCompletableQuest ? npc.getCompletableQuest() : null;
+            const a = npc.getAvailableQuest    ? npc.getAvailableQuest()    : null;
+            const icon = q ? " ❓" : a ? " ❗" : "";
+            ctx.fillStyle = "rgba(200,220,255,0.8)"; ctx.font = "14px Georgia"; ctx.textAlign = "center";
+            ctx.fillText(`[E] Talk to ${npc.name}${icon}`, canvas.width / 2, canvas.height - 60);
+            return;
+        }
+    }
+    if (!game.interactTarget) return;
+    const label = game.interactTarget.isDoor ? `→ ${game.interactTarget.label}` : game.interactTarget.label;
+    ctx.fillStyle = "rgba(200,200,200,0.75)"; ctx.font = "14px Georgia"; ctx.textAlign = "center";
+    ctx.fillText(`[E] ${label}`, canvas.width / 2, canvas.height - 60);
+}
+
+function drawTransition() {
+    if (transitionState === "none" && transitionAlpha <= 0) return;
+    if (transitionState === "fadeOut") {
+        transitionAlpha += 0.045;
+        if (transitionAlpha >= 1) {
+            transitionAlpha = 1; transitionState = "fadeIn";
+            if (transitionCallback) {
+                const cb = transitionCallback; transitionCallback = null;
+                try { cb(); } catch (e) { console.warn("Transition callback error:", e); }
+            }
+        }
+    } else if (transitionState === "fadeIn") {
+        transitionAlpha -= 0.035;
+        if (transitionAlpha <= 0) { transitionAlpha = 0; transitionState = "none"; }
+    }
+    ctx.fillStyle = `rgba(0,0,0,${transitionAlpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ─── MINIMAP ────────────────────────────────────────────────────
+function drawMinimap() {
+    if (!minimapCtx) return;
+    const mc = minimapCtx, mw = 160, mh = 120;
+    mc.fillStyle = "rgba(5,5,15,0.9)"; mc.fillRect(0, 0, mw, mh);
+    const layout = {
+        foyer:{x:80,y:55}, library:{x:40,y:55}, dining_room:{x:120,y:55}, kitchen:{x:80,y:80},
+        parlor:{x:60,y:80}, ballroom:{x:140,y:40}, conservatory:{x:25,y:75}, greenhouse:{x:50,y:95},
+        garden_path:{x:40,y:108}, servants_quarters:{x:100,y:80}, gallery:{x:140,y:25}, wine_cellar:{x:110,y:95},
+        upstairs_hall:{x:80,y:30}, master_bedroom:{x:50,y:25}, childrens_room:{x:110,y:25}, study:{x:80,y:12},
+        nursery:{x:60,y:12}, attic_stairs:{x:100,y:12}, attic:{x:120,y:8}, bell_tower:{x:140,y:8},
+        basement:{x:80,y:95}, ritual_chamber:{x:70,y:108}, secret_room:{x:25,y:60}, catacombs:{x:60,y:108},
+        underground_lake:{x:45,y:115}, void_chamber:{x:80,y:115}, graveyard:{x:25,y:115}, chapel:{x:12,y:115},
+        well:{x:55,y:115}, clock_tower:{x:95,y:8},
+    };
+    for (let id of roomsVisited) {
+        const pos = layout[id]; if (!pos) continue;
+        mc.fillStyle = id === game.currentRoom ? "#ffdd44" : "rgba(100,140,200,0.5)";
+        mc.fillRect(pos.x - 4, pos.y - 3, 8, 6);
+        if (id === game.currentRoom) {
+            mc.strokeStyle = "#ffdd44"; mc.lineWidth = 1;
+            mc.strokeRect(pos.x - 6, pos.y - 5, 12, 10);
+        }
+    }
+    for (let id in layout) {
+        if (roomsVisited.has(id)) continue;
+        const pos = layout[id];
+        mc.fillStyle = "rgba(50,50,50,0.3)"; mc.fillRect(pos.x - 2, pos.y - 1, 4, 2);
+    }
+    mc.fillStyle = "rgba(150,150,150,0.4)"; mc.font = "8px 'Courier New'"; mc.textAlign = "center";
+    mc.fillText("MAP", mw / 2, mh - 3);
+}
+
+// ─── TIME LOOP ──────────────────────────────────────────────────
+function updateLoopTimer() {
+    if (dialogActive || journalOpen || transitionState !== "none") return;
+    game.loopTime += 1 / 60;
+
+    if (game.maxLoopTime - game.loopTime < 60 && Math.floor(game.loopTime * 60) % 60 === 0) _safe(window.playSound, "clock");
+    if (game.maxLoopTime - game.loopTime < 10 && Math.floor(game.loopTime * 60) % 30 === 0) _safe(window.playSound, "heartbeat");
+
+    if (typeof BALANCE_HANDLES_SANITY === "undefined" || !BALANCE_HANDLES_SANITY) {
+        game.sanity -= 0.003;
+    }
+    game.sanity = Math.max(0, game.sanity);
+
+    if (game.loopTime >= game.maxLoopTime) triggerLoopReset();
+    if (game.sanity <= 0) triggerLoopReset("Your mind shatters. Darkness consumes. Time resets...");
+}
+
+function triggerLoopReset(customMessage) {
+    if (typeof DeathMemories !== "undefined" && DeathMemories.recordDeath) {
+        const cause = game.sanity <= 0 ? "sanity" : "time";
+        DeathMemories.recordDeath(game.currentRoom, game.playerX, game.playerY, cause);
+    }
+    _safe(window.playSound, "timeReset");
+    _safe(window.trackStat, "loop_complete");
+    if (game.sanity <= 0) _safe(window.trackStat, "sanity_death"); else _safe(window.trackStat, "death");
+    game.loop++;
+
+    const saved = {
+        perm: { ...game.permanentFlags }, clues: [...game.cluesFound], journal: [...game.journalEntries],
+        loop: game.loop, level: game.level, xp: game.xp, xpToNext: game.xpToNext, totalXP: game.totalXP,
+        maxSanity: game.maxSanity, missions: [...game.completedMissions], missCount: game.missionsComplete,
+        maxLoop: game.maxLoopTime,
+    };
+
+    game.loopTime = 0; game.sanity = saved.maxSanity; game.inventory = []; game.flags = {};
+    game.flashlightBattery = 100; game.flashlightOn = true;
+    game.currentRoom = "foyer"; game.playerX = 400; game.playerY = 480;
+    game.playerAngle = -Math.PI / 2;
+    game.permanentFlags = saved.perm; game.cluesFound = saved.clues; game.journalEntries = saved.journal;
+    game.loop = saved.loop; game.level = saved.level; game.xp = saved.xp;
+    game.xpToNext = saved.xpToNext; game.totalXP = saved.totalXP; game.maxSanity = saved.maxSanity;
+    game.completedMissions = saved.missions; game.missionsComplete = saved.missCount;
+    game.maxLoopTime = saved.maxLoop;
+    game.ghostsActive = []; game.interactTarget = null;
+
+    if (saved.perm.hasFirstSeal)  addItem("seal_1","🔮","Seal Fragment #1");
+    if (saved.perm.hasSecondSeal) addItem("seal_2","🔮","Seal Fragment #2");
+    if (saved.perm.hasThirdSeal)  addItem("seal_3","🔮","Seal Fragment #3");
+    if (saved.perm.hasFourthSeal) addItem("seal_4","🔮","Seal Fragment #4");
+    if (saved.perm.hasFifthSeal)  addItem("seal_5","🔮","Seal Fragment #5");
+
+    dialogQueue = []; dialogActive = false; dialogBox.classList.add("hidden");
+    updateInventoryUI();
+
+    _safe(window.resetEventState);
+    _safe(window.resetCombat);
+    _safe(window.resetNPCs);
+    if (typeof StoryEngine !== "undefined" && StoryEngine.reset) StoryEngine.reset();
+    if (typeof Monologue   !== "undefined" && Monologue.reset)   Monologue.reset();
+    if (typeof HouseDecay  !== "undefined" && HouseDecay.reset)  HouseDecay.reset();
+    if (typeof SetPieces   !== "undefined" && SetPieces.reset)   SetPieces.reset();
+    _safe(window.setupWeatherForRoom, "foyer");
+    if (typeof AudioWiring !== "undefined" && AudioWiring.reset) AudioWiring.reset();
+    if (typeof Balance     !== "undefined" && Balance.reset)     Balance.reset();
+    _safe(window.saveGame);
+
+    const msg = customMessage || "The clock strikes midnight. Time folds. You remember.";
+    addClue(`loop_${game.loop}`, `— Loop #${game.loop + 1} begins —`);
+
+    transitionState = "fadeOut"; transitionAlpha = 0;
+    transitionCallback = () => {
+        showDialog("⏰ TIME RESET", msg);
+        if (game.loop === 1) showDialog("NARRATOR", "Déjà vu. The house feels different.");
+        else if (game.loop === 2) showDialog("NARRATOR", "Third loop. Memories sharpen.");
+        else if (game.loop === 3) showDialog("NARRATOR", "The house fights back.");
+        else if (game.loop >= 4)  showDialog("NARRATOR", "Closer than ever.");
+        setTimeout(checkMissions, 0);
+        _safe(window.triggerMonologue, "loop_start", true);
+    };
+}
+
+// ─── ENDINGS ────────────────────────────────────────────────────
+function startEnding(type) {
+    game.endingReached = type;
+    if (typeof AudioWiring !== "undefined" && AudioWiring.playEndingMusic) AudioWiring.playEndingMusic(type);
+    _safe(window.trackStat, "ending", type);
+    _safe(window.saveGame);
+    transitionState = "fadeOut"; transitionAlpha = 0;
+    transitionCallback = () => { gameState = "ending"; _safe(window.saveGame); };
+}
+
+function drawEnding() {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const cw = canvas.width, ch = canvas.height, t = frame * 0.01;
+    const E = {
+        good:      { title:"THE CHAIN IS BROKEN",  color:"#4488cc", quote:'"Love breaks all chains."',         label:"GOOD ENDING" },
+        perfect:   { title:"DAWN BREAKS",          color:"#ffcc44", quote:'"Love forges chains too."',         label:"PERFECT ENDING" },
+        sacrifice: { title:"THE NEW GUARDIAN",     color:"#8866cc", quote:'"Some chains are worn willingly."', label:"SACRIFICE ENDING" },
+        bad:       { title:"THE ENTITY IS FREE",   color:"#cc2200", quote:'"Some doors should stay closed."',  label:"BAD ENDING" },
+    };
+    const e = E[game.endingReached] || E.bad;
+    for (let i = 0; i < 100; i++) {
+        ctx.fillStyle = `${e.color}${Math.floor((Math.sin(t + i * 0.5) * 0.3 + 0.4) * 255).toString(16).padStart(2,'0')}`;
+        ctx.fillRect((Math.sin(i * 7.3 + t * 0.3) * 0.5 + 0.5) * cw,
+                     (Math.cos(i * 3.7 + t * 0.2) * 0.5 + 0.5) * ch, 2, 2);
+    }
+    ctx.fillStyle = e.color; ctx.font = "bold 42px Georgia"; ctx.textAlign = "center";
+    ctx.fillText(e.title, cw / 2, ch / 2 - 80);
+    ctx.fillStyle = e.color + "bb"; ctx.font = "17px Georgia";
+    ctx.fillText(`Loops: ${game.loop + 1} | Level: ${game.level} | Clues: ${game.cluesFound.length} | Rooms: ${roomsVisited.size}/30`,
+                 cw / 2, ch / 2 - 20);
+    ctx.fillStyle = e.color + "88"; ctx.font = "italic 16px Georgia";
+    ctx.fillText(e.quote, cw / 2, ch / 2 + 30);
+    ctx.fillStyle = e.color + "66"; ctx.font = "14px Georgia";
+    ctx.fillText(e.label, cw / 2, ch / 2 + 70);
+    if (Math.sin(frame * 0.06) > 0) {
+        ctx.fillStyle = "rgba(200,200,200,0.5)"; ctx.font = "16px 'Courier New'";
+        ctx.fillText("Click or Enter to return to menu", cw / 2, ch - 50);
+    }
+}
+
+// ─── MENU ───────────────────────────────────────────────────────
+function drawMenu() {
+    const cw = canvas.width, ch = canvas.height, t = frame * 0.005;
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, cw, ch);
+    for (let i = 0; i < 80; i++) {
+        ctx.fillStyle = `rgba(80,60,100,${Math.sin(t + i * 0.4) * 0.15 + 0.15})`;
+        ctx.beginPath(); ctx.arc((Math.sin(i * 3.7 + t) * 0.5 + 0.5) * cw,
+                                 (Math.cos(i * 2.3 + t * 0.7) * 0.5 + 0.5) * ch, 2, 0, Math.PI * 2); ctx.fill();
+    }
+    const vig = ctx.createRadialGradient(cw / 2, ch / 2, 100, cw / 2, ch / 2, cw * 0.6);
+    vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(0,0,0,0.8)");
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, cw, ch);
+
+    ctx.fillStyle = `rgba(100,110,260,${0.7 + Math.sin(t * 3) * 0.1})`;
+    ctx.font = "bold 50px Georgia"; ctx.textAlign = "center";
+    ctx.fillText("ECHOES OF MIDNIGHT", cw / 2, ch / 2 - 130);
+    ctx.fillStyle = "rgb(185,46,46)"; ctx.font = "italic 20px Georgia";
+    ctx.fillText("A Time Loop Mystery", cw / 2, ch / 2 - 85);
+
+    ctx.fillStyle = "rgba(124,139,106,0.76)"; ctx.font = "15px Georgia";
+    ["You are trapped in a haunted mansion.", "Every 10 minutes, time resets.",
+     "Each loop, you remember more.", "30 rooms. 5 seals. 4 endings.",
+     "Solve the mystery. Break the loop."].forEach((l, i) =>
+        ctx.fillText(l, cw / 2, ch / 2 - 25 + i * 25));
+
+    ctx.fillStyle = "rgba(57,78,105,0.66)"; ctx.font = "13px 'Courier New'";
+    ctx.fillText("WASD:Move | E:Interact | Q:Attack | F:Flashlight | J:Journal", cw / 2, ch / 2 + 115);
+    ctx.fillText("Shift:Dodge | U:Unstuck | Esc:Close dialog", cw / 2, ch / 2 + 135);
+
+    if (Math.sin(frame * 0.06) > 0) {
+        ctx.fillStyle = "rgb(255,255,255)"; ctx.font = "18px Georgia";
+        ctx.fillText("Click or press Enter to begin", cw / 2, ch / 2 + 180);
+    }
+    if (typeof loadGame === "function") {
+        try {
+            const sd = loadGame();
+            if (sd) {
+                ctx.fillStyle = "rgba(100,200,100,0.5)"; ctx.font = "15px Georgia";
+                ctx.fillText("Press C to Continue Saved Game", cw / 2, ch / 2 + 210);
+            }
+        } catch(e) {}
+    }
+    if (typeof gameStats !== "undefined" && gameStats.gamesPlayed > 0) {
+        ctx.fillStyle = "rgba(100,100,100,0.3)"; ctx.font = "11px 'Courier New'";
+        ctx.fillText(`Games:${gameStats.gamesPlayed} | 🏆${gameStats.achievementsUnlocked.size}/${typeof ACHIEVEMENTS !== "undefined" ? ACHIEVEMENTS.length : "?"} | Endings:${gameStats.endingsReached.size}/4`,
+                     cw / 2, ch / 2 + 240);
+    }
+    ctx.fillStyle = "rgba(80,80,80,0.3)"; ctx.font = "10px 'Courier New'";
+    ctx.fillText("Pure JavaScript — No frameworks", cw / 2, ch - 20);
+}
+
+// ─── START NEW GAME ─────────────────────────────────────────────
+function startNewGame() {
+    gameState = "playing";
+    Object.assign(game, {
+        loop:0, loopTime:0, sanity:100, maxSanity:100, inventory:[], cluesFound:[], journalEntries:[],
+        flags:{}, permanentFlags:{}, currentRoom:"foyer", playerX:400, playerY:480,
+        playerAngle:-Math.PI/2, flashlightBattery:100, flashlightOn:true, interactTarget:null,
+        endingReached:null, xp:0, level:1, xpToNext:50, totalXP:0, maxLoopTime:600,
+        roomsExplored:0, itemsFound:0, ghostsSeen:0, missionsComplete:0, completedMissions:[],
+    });
+    roomsVisited = new Set(["foyer"]);
+    dialogQueue = []; dialogActive = false; dialogBox.classList.add("hidden");
+    journalEl.classList.add("hidden"); journalOpen = false;
+    updateInventoryUI();
+
+    _safe(window.setupWeatherForRoom, "foyer");
+    _safe(window.resetCombat);
+    _safe(window.initNPCs);
+    _safe(window.installSubtitleOverride);
+    if (typeof gameStats !== "undefined") gameStats.gamesPlayed++;
+    _safe(window.saveGame);
+
+    addClue("start", "— Loop #1 begins — You awaken in Thornwood Manor.");
+    showDialog("NARRATOR", "You wake in the grand foyer of an old mansion. The door is sealed. A grandfather clock chimes midnight.");
+    showDialog("NARRATOR", "You have a flashlight. Five minutes until something happens. Explore. Press E to interact. J for journal.");
+}
+
+// ─── MAIN LOOP ──────────────────────────────────────────────────
+function gameLoop() {
+    // Wrap frame to prevent precision loss over long sessions
+    frame = (frame + 1) % 1000000;
+
+    try {
+        switch (gameState) {
+            case "menu":
+                drawMenu();
+                if (keysJustPressed["Enter"] || keysJustPressed["Space"]) {
+                    _ensureAudio(); startNewGame();
+                    consumeKey("Enter"); consumeKey("Space");
+                }
+                if (keysJustPressed["KeyC"] && typeof loadGame === "function") {
+                    try {
+                        const sd = loadGame();
+                        if (sd) {
+                            _ensureAudio(); gameState = "playing";
+                            if (typeof applySaveData === "function") applySaveData(sd);
+                            updateInventoryUI();
+                            showDialog("SYSTEM", "Game loaded. Welcome back.");
+                        }
+                    } catch (e) { console.warn("Load failed:", e); }
+                    consumeKey("KeyC");
+                }
+                break;
+
+            case "playing":
+                updatePlayer();
+                updateLoopTimer();
+                if (typeof updateParticles === "function") updateParticles();
+                _safe(window.updateEvents);
+                _safe(window.updateCombat);
+                _safe(window.updateNPCs);
+                _safe(window.updateAutoSave);
+                if (typeof SubtitleSystem      !== "undefined" && SubtitleSystem.update)      SubtitleSystem.update();
+                if (typeof SoundtrackManager   !== "undefined" && SoundtrackManager.update)   SoundtrackManager.update(game.currentRoom);
+                if (typeof AudioManager        !== "undefined" && AudioManager.initialized)   AudioManager.update(game.currentRoom);
+                if (typeof checkAchievements   === "function"  && frame % 120 === 0)          checkAchievements();
+                if (typeof Monologue           !== "undefined" && Monologue.update)           Monologue.update();
+                if (typeof HouseDecay          !== "undefined" && HouseDecay.update)          HouseDecay.update();
+                if (typeof SetPieces           !== "undefined" && SetPieces.update)           SetPieces.update();
+                if (typeof AudioWiring         !== "undefined" && AudioWiring.update)         AudioWiring.update();
+                if (typeof Balance             !== "undefined" && Balance.masterUpdate)       Balance.masterUpdate();
+                render();
+                break;
+
+            case "ending":
+                drawEnding();
+                if (keysJustPressed["Enter"] || keysJustPressed["Space"]) {
+                    gameState = "menu";
+                    consumeKey("Enter"); consumeKey("Space");
+                }
+                break;
+        }
+    } catch (e) {
+        console.error("Main loop error:", e);
+    }
+
+    clearJustPressed();
+    requestAnimationFrame(gameLoop);
+}
+
+// ─── START ──────────────────────────────────────────────────────
+requestAnimationFrame(gameLoop);

@@ -1,0 +1,124 @@
+# ==============================================================================
+# NUCLEAR BLACKLIST (Maximum Protection, Normal Workflow)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. THE DEADLY SIN LEAKS (Absolute Security Zero-Tolerance)
+# ------------------------------------------------------------------------------
+*.env
+*.env.*
+.envrc
+*.pem
+*.key
+*.pkcs12
+*.pfx
+*.p12
+*.crt
+*.csr
+*secret*
+*credential*
+*password*
+*token*
+id_rsa
+id_dsa
+*.keystore
+*.jks
+config/jwt/
+.aws/
+.gcloud/
+.azure/
+.netrc
+
+# ------------------------------------------------------------------------------
+# 2. THE GIANT BLACK HOLES (Heavy Dependencies & Build Outputs)
+# ------------------------------------------------------------------------------
+# Node / Frontend
+node_modules/
+bower_components/
+.npm/
+.yarn/
+dist/
+build/
+.next/
+.nuxt/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+.coverage
+htmlcov/
+.pytest_cache/
+.poetry/
+
+# Java / Maven / Gradle
+target/
+!.mvn/wrapper/maven-wrapper.jar
+build/
+.gradle/
+buildOutput/
+
+# C / C++ / C#
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.app
+*.msi
+*.pdb
+*.suo
+*.user
+
+# ------------------------------------------------------------------------------
+# 3. SYSTEM & WORKSPACE CLUTTER (OS & IDE Garbage)
+# ------------------------------------------------------------------------------
+# Operating Systems
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDEs / Editors
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.iws
+*.iml
+.classpath
+.project
+.settings/
+*.sublime-workspace
+.project.nx
+
+# ------------------------------------------------------------------------------
+# 4. MISC LETHAL WEIGHT (Logs, Databases, Backups)
+# ------------------------------------------------------------------------------
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql
+*.tmp
+*.bak
+*.swp
+*~
+.sass-cache/
+.eslintcache

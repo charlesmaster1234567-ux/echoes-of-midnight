@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script>
+// ═══════════════════════════════════════════════════════
+//  HEAD SAFETY NET — Error overlay + stub fallbacks
+//  Must be FIRST script in <head>
+// ═══════════════════════════════════════════════════════
+(function() {
+    "use strict";
+
+    // ── Error Overlay ─────────────────────────────────────
+    const errors = [];
+    const MAX_ERRORS = 20;
+    const MAX_DISPLAY = 10;
+
+    window.addEventListener("error", function(e) {
+        const file = e.filename ? e.filename.split("/").pop() : "?";
+        const msg  = `${e.message || "Unknown error"} @ ${file}:${e.lineno || "?"}`;
+
+        // Dedupe
+        if (errors.includes(msg)) { e.preventDefault(); return true; }
+        errors.push(msg);
+
+        // Create or update overlay
+        let div = document.getElementById("_errorOverlay");
+        if (!div) {
+            div = document.createElement("div");
+            div.id = "_errorOverlay";
+            div.style.cssText =
+                "position:fixed;top:0;left:0;right:0;" +
+                "background:#300;color:#fcc;font:11px monospace;" +
+                "padding:8px;z-index:99999;max-height:35vh;" +
+                "overflow:auto;border-bottom:2px solid #f00;" +
+                "pointer-events:auto;cursor:pointer;";
+            div.title = "Click to dismiss";
+            div.addEventListener("click", function() {
+                div.style.display = div.style.display === "none" ? "" : "none";
+            });
+            document.body.appendChild(div);
+        }
+
+        div.style.display = "";
+        div.innerHTML =
+            `<b>⚠ ERRORS (${errors.length}):</b> <small>(click to dismiss)</small><br>` +
+            errors.slice(-MAX_DISPLAY).map(function(e) {
+                return "• " + e;
+            }).join("<br>");
+
+        // Hard stop after too many unique errors
+        if (errors.length >= MAX_ERRORS) {
+            errors.push("STOPPED — too many errors");
+            try { window.requestAnimationFrame = function() {}; } catch(_) {}
+        }
+
+        e.preventDefault();
+        return true;
+    });
+
+    // Expose for debugging
+    window._errors = errors;
+
+    // ── Stub Fallbacks ────────────────────────────────────
+    // These ensure no ReferenceError if a script loads out
+    // of order or fails to load entirely.
+    // Each real file REPLACES these when it loads.
+
+    // Audio
+    if (!window.AudioManager) {
+        window.AudioManager = {
+            initialized: false,
+            init:function(){}, resume:function(){}, update:function(){},
+            playSFX:function(){return null}, playVoice:function(){return null},
+            playMusic:function(){}, stopMusic:function(){},
+            setRoomAmbience:function(){}, stopAllAmbience:function(){},
+            setMasterVolume:function(){}, setMusicVolume:function(){},
+            setSFXVolume:function(){}, load:function(){},
+        };
+    }
+
+    if (!window.AudioEngine) {
+        window.AudioEngine = {
+            initialized: false, ctx: null,
+            init:function(){}, resume:function(){},
+            playSFX:function(){}, playFlashlightFlicker:function(){},
+            playAmbienceSound:function(){}, playNote:function(){},
+            updateMusic:function(){}, updateAmbience:function(){},
+            stopAll:function(){},
+        };
+    }
+
+    if (!window.AudioWiring) {
+        window.AudioWiring = {
+            update:function(){}, reset:function(){},
+            playFootstep:function(){}, playEndingMusic:function(){},
+            playContextual:function(){}, playDelayed:function(){},
+            playInteractSound:function(){}, playSealFound:function(){},
+            playLevelUp:function(){}, playAchievement:function(){},
+        };
+    }
+
+    if (!window.AudioTriggers) {
+        window.AudioTriggers = {
+            update:function(){}, reset:function(){},
+        };
+    }
+
+    // Subtitle
+    if (!window.SubtitleSystem) {
+        window.SubtitleSystem = {
+            messages: [], _pendingQueue: [],
+            show:function(){}, update:function(){},
+            draw:function(){}, clear:function(){},
+        };
+    }
+
+    // Balance
+    if (!window.Balance) {
+        window.Balance = {
+            masterUpdate:function(){}, reset:function(){}, apply:function(){},
+            canInteract:function(){return true},
+            getGhostDrainRate:function(){return 0.02},
+            getSanityDrainRate:function(){return 0.003},
+            getFlashlightDrainRate:function(){return 0.006},
+            getMaxSanity:function(){return 100},
+            getMaxHP:function(){return 100},
+            getLoopDuration:function(){return 600},
+            getEncounterChance:function(){return 0.15},
+            getWeaponDamage:function(){return 5},
+            getPlayerDamageReduction:function(){return 0},
+            XP_SCALE: {},
+        };
+    }
+
+    // Camera / Cinema
+    if (!window.Camera) {
+        window.Camera = {
+            x:0, y:0, zoom:1, angle:0,
+            update:function(){}, getTransform:function(cw,ch,rw,rh){
+                var s = Math.min(cw/rw, ch/rh);
+                return {scale:s, camX:0, camY:0, angle:0};
+            },
+            drawVignette:function(){}, drawGrain:function(){},
+            scareZoom:function(){}, zoomTo:function(){},
+            panTo:function(){}, pullBack:function(){},
+            tilt:function(){}, reset:function(){},
+        };
+    }
+
+    if (!window.SetPieces) {
+        window.SetPieces = {
+            active: null,
+            update:function(){}, draw:function(){},
+            drawOverlay:function(){}, reset:function(){},
+        };
+    }
+
+    if (!window.DeathMemories) {
+        window.DeathMemories = {
+            ghosts: [],
+            recordDeath:function(){}, draw:function(){},
+            getNearestGhost:function(){return null},
+            interactWithGhost:function(){},
+            reset:function(){}, save:function(){return[]},
+            load:function(){},
+        };
+    }
+
+    // Flashlight / Soundtrack stubs
+    if (!window.SoundtrackManager) {
+        window.SoundtrackManager = { update:function(){} };
+    }
+    if (!window.FlashlightSystem) {
+        window.FlashlightSystem = {
+            update:function(){return 1},
+            getRange:function(){return{range:200,alpha:0.5,coneAngle:0.5}},
+        };
+    }
+
+    // Particles
+    if (!window.particles)   window.particles  = [];
+    if (!window.footprints)  window.footprints = [];
+
+    // Particle functions
+    if (typeof window.emitDust       !== "function") window.emitDust       = function(){};
+    if (typeof window.emitFog        !== "function") window.emitFog        = function(){};
+    if (typeof window.emitBlood      !== "function") window.emitBlood      = function(){};
+    if (typeof window.emitEmbers     !== "function") window.emitEmbers     = function(){};
+    if (typeof window.emitSpirit     !== "function") window.emitSpirit     = function(){};
+    if (typeof window.emitTendril    !== "function") window.emitTendril    = function(){};
+    if (typeof window.emitSparks     !== "function") window.emitSparks     = function(){};
+    if (typeof window.emitScareText  !== "function") window.emitScareText  = function(){};
+    if (typeof window.emitLevelUpParticles !== "function") window.emitLevelUpParticles = function(){};
+    if (typeof window.updateParticles !== "function") window.updateParticles = function(){};
+    if (typeof window.drawParticles   !== "function") window.drawParticles   = function(){};
+    if (typeof window.trackFootprints !== "function") window.trackFootprints = function(){};
+    if (typeof window.triggerShake    !== "function") window.triggerShake    = function(){};
+    if (typeof window.getShakeOffset  !== "function") window.getShakeOffset  = function(){return{x:0,y:0}};
+    if (typeof window.setupWeatherForRoom !== "function") window.setupWeatherForRoom = function(){};
+
+    // Cinema functions
+    if (typeof window.updateCinema !== "function") window.updateCinema = function(){};
+
+    // Combat
+    if (!window.combat) {
+        window.combat = {
+            active:false, bossActive:false,
+            attackCooldown:0, dodgeActive:false, dodgeTimer:0,
+            playerHP:100, maxHP:100,
+            comboCount:0, comboTimer:0,
+            playerDamageFlash:0, equippedWeapon:"fists",
+            totalKills:0,
+        };
+    }
+
+    // Story
+    if (!window.StoryEngine) {
+        window.StoryEngine = {
+            update:function(){}, consequences:{dangerRooms:new Set()},
+            currentChapter:"chapter_1", reset:function(){},
+        };
+    }
+
+    // Missions
+    if (!window.MissionSystem) {
+        window.MissionSystem = {
+            update:function(){}, reset:function(){},
+            draw:function(){}, getActive:function(){return null},
+        };
+    }
+
+    // NPC functions
+    if (typeof window.initNPCs    !== "function") window.initNPCs    = function(){};
+    if (typeof window.updateNPCs  !== "function") window.updateNPCs  = function(){};
+    if (typeof window.drawNPCs    !== "function") window.drawNPCs    = function(){};
+    if (typeof window.getNearestNPC !== "function") window.getNearestNPC = function(){return null};
+    if (typeof window.resetNPCs   !== "function") window.resetNPCs   = function(){};
+
+    // Common game functions
+    if (typeof window.playSound         !== "function") window.playSound         = function(){};
+    if (typeof window.showDialog        !== "function") window.showDialog        = function(){};
+    if (typeof window.showDialogWithChoices !== "function") window.showDialogWithChoices = function(){};
+    if (typeof window.addClue           !== "function") window.addClue           = function(){};
+    if (typeof window.addItem           !== "function") window.addItem           = function(){};
+    if (typeof window.hasItem           !== "function") window.hasItem           = function(){return false};
+    if (typeof window.removeItem        !== "function") window.removeItem        = function(){};
+    if (typeof window.giveXP            !== "function") window.giveXP            = function(){};
+    if (typeof window.countSeals        !== "function") window.countSeals        = function(){return 0};
+    if (typeof window.triggerMonologue  !== "function") window.triggerMonologue  = function(){};
+    if (typeof window.getCurrentRoom    !== "function") window.getCurrentRoom    = function(){return null};
+    if (typeof window.initAudio         !== "function") window.initAudio         = function(){};
+    if (typeof window.installSubtitleOverride !== "function") window.installSubtitleOverride = function(){};
+
+    // Global state stubs (game.js defines the real ones)
+    if (typeof window.frame         === "undefined") window.frame         = 0;
+    if (typeof window.gameState     === "undefined") window.gameState     = "menu";
+    if (typeof window.dialogActive  === "undefined") window.dialogActive  = false;
+    if (typeof window.journalOpen   === "undefined") window.journalOpen   = false;
+    if (typeof window.transitionState === "undefined") window.transitionState = "none";
+    if (typeof window.roomsVisited  === "undefined") window.roomsVisited  = new Set();
+
+    // ROOMS stub (rooms.js replaces this immediately)
+    if (!window.ROOMS) window.ROOMS = {};
+
+    console.log("✓ Safety stubs ready (" + Object.keys(window).length + " globals)");
+})();
+</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echoes of Midnight</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background: #130f0f;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Georgia', 'Times New Roman', serif;
+        }
+
+        canvas {
+            display: block;
+            cursor: none;
+        }
+
+        #dialogBox {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 720px;
+            max-width: 92vw;
+            background: rgba(5, 5, 15, 0.96);
+            border: 2px solid rgb(51, 67, 68);
+            border-radius: 10px;
+            padding: 22px 28px;
+            color: #ccc;
+            font-size: 16px;
+            line-height: 1.7;
+            z-index: 100;
+            box-shadow: 0 0 40px rgba(0,0,0,0.9), inset 0 0 80px rgba(20,20,50,0.3);
+        }
+
+        #dialogSpeaker {
+            color: rgb(136, 255, 166);
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+
+        #dialogText {
+            min-height: 44px;
+            font-style: italic;
+        }
+
+        #dialogContinue {
+            text-align: right;
+            color: #555;
+            animation: blink 1s infinite;
+            margin-top: 10px;
+            font-size: 13px;
+            letter-spacing: 1px;
+        }
+
+        #dialogChoices {
+            margin-top: 12px;
+        }
+
+        #dialogChoices div {
+            padding: 10px 14px;
+            margin: 5px 0;
+            background: rgba(40, 40, 80, 0.5);
+            border: 1px solid #445;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #aaa;
+        }
+
+        #dialogChoices div:hover {
+            background: rgba(70, 70, 140, 0.7);
+            border-color: #88f;
+            color: #fff;
+            transform: translateX(4px);
+        }
+
+        #inventory {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            display: flex;
+            gap: 5px;
+            z-index: 90;
+            flex-wrap: wrap;
+            max-width: 320px;
+        }
+
+        .inv-item {
+            width: 46px;
+            height: 46px;
+            background: rgba(10, 10, 30, 0.88);
+            border: 1px solid #334;
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+        }
+
+        .inv-item:hover {
+            border-color: #88f;
+            transform: scale(1.15);
+        }
+
+        .inv-item .tooltip {
+            display: none;
+            position: absolute;
+            bottom: 52px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.96);
+            border: 1px solid #556;
+            padding: 5px 12px;
+            border-radius: 5px;
+            font-size: 11px;
+            white-space: nowrap;
+            color: #bbb;
+            font-family: 'Georgia', serif;
+        }
+
+        .inv-item:hover .tooltip {
+            display: block;
+        }
+
+        #journal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 520px;
+            max-width: 92vw;
+            max-height: 72vh;
+            background: rgba(10, 8, 5, 0.98);
+            border: 2px solid #554433;
+            border-radius: 10px;
+            padding: 28px;
+            color: #aa9977;
+            z-index: 200;
+            overflow-y: auto;
+            box-shadow: 0 0 60px rgba(0,0,0,0.95);
+        }
+
+        #journal h2 {
+            text-align: center;
+            color: #ccaa77;
+            margin-bottom: 18px;
+            font-size: 22px;
+        }
+
+        .journal-entry {
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #332211;
+        }
+
+        .journal-loop {
+            color: #665544;
+            font-size: 11px;
+            margin-bottom: 3px;
+        }
+
+        .journal-clue {
+            color: #ddaa55;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        #journalClose {
+            text-align: center;
+            margin-top: 18px;
+            color: #665544;
+            cursor: pointer;
+            font-size: 14px;
+            letter-spacing: 3px;
+            transition: color 0.2s;
+        }
+
+        #journalClose:hover {
+            color: #ccaa77;
+        }
+
+        #levelUpNotice {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ffdd66;
+            font-size: 36px;
+            font-weight: bold;
+            z-index: 300;
+            text-shadow: 0 0 30px #ff8800, 0 0 60px #ff4400;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        #minimap {
+            position: fixed;
+            bottom: 12px;
+            right: 12px;
+            width: 160px;
+            height: 120px;
+            background: rgba(5,5,15,0.85);
+            border: 1px solid #334;
+            border-radius: 8px;
+            z-index: 80;
+            overflow: hidden;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.2; }
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    </style>
+<!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b0b0b">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/x-icon"       href="icons/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+
+  <!-- Apple -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180x180.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167x167.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152x152.png">
+
+  <!-- Windows -->
+  <meta name="msapplication-TileImage"           content="icons/icon-144.png">
+  <meta name="msapplication-TileColor"           content="#130f0f">
+  <meta name="msapplication-square70x70logo"     content="icons/icon-70x70.png">
+  <meta name="msapplication-square150x150logo"   content="icons/icon-150x150.png">
+  <meta name="msapplication-wide310x150logo"     content="icons/icon-310x150.png">
+  <meta name="msapplication-square310x310logo"   content="icons/icon-310x310.png">
+
+  <!-- Open Graph -->
+  <meta property="og:image"        content="icons/og-image.jpg">
+  <meta property="og:image:width"  content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:title"        content="Echoes of Midnight">
+  <meta property="og:description"  content="A mystical horror thriller. Find the seals. Break the loop.">
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="dialogBox" class="hidden">
+        <div id="dialogSpeaker"></div>
+        <div id="dialogText"></div>
+        <div id="dialogChoices"></div>
+        <div id="dialogContinue">Press SPACE to continue ▼</div>
+    </div>
+
+    <div id="inventory" class="hidden"></div>
+
+    <div id="journal" class="hidden">
+        <h2>📓 JOURNAL</h2>
+        <div id="journalContent"></div>
+        <div id="journalClose">[ CLOSE — J ]</div>
+    </div>
+
+<!-- DATA -->
+<script src="rooms.js"></script>
+
+<!-- Optional crash protection block is here -->
+<script>
+(function() {
+    let frameCount = 0;
+    let lastFrameTime = performance.now();
+    let totalLagFrames = 0;
+
+    const originalRAF = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = function(callback) {
+        return originalRAF(function(time) {
+            const now = performance.now();
+            const delta = now - lastFrameTime;
+            lastFrameTime = now;
+
+            if (delta > 100) {
+                totalLagFrames++;
+                if (totalLagFrames > 60) {
+                    if (frameCount % 2 === 0) {
+                        frameCount++;
+                        return;
+                    }
+                }
+            } else {
+                totalLagFrames = Math.max(0, totalLagFrames - 1);
+            }
+
+            frameCount++;
+            try {
+                callback(time);
+            } catch(e) {
+                console.error("Frame error caught:", e);
+            }
+        });
+    };
+
+    let errorCount = 0;
+    window.addEventListener("error", function(e) {
+        errorCount++;
+        if (errorCount > 50) {
+            console.error("STOPPING: too many errors");
+            window.requestAnimationFrame = function() {};
+        }
+        e.preventDefault();
+        return true;
+    });
+
+    console.log("✓ Crash protection active");
+})();
+</script>
+
+<!-- AUDIO CORE -->
+<script src="audio_engine.js"></script>
+<script src="audio_manager.js"></script>
+<script src="audio_triggers.js"></script>
+
+<!-- VISUAL / UI SYSTEMS -->
+<script src="subtitle_system.js"></script>
+<script src="particles.js"></script>
+<script src="cinema.js"></script>
+
+<!-- GAMEPLAY SYSTEMS -->
+<script src="story_engine.js"></script>
+<script src="combat.js"></script>
+<script src="events.js"></script>
+<script src="npcs.js"></script>
+<script src="missions.js"></script>
+<script src="achievements.js"></script>
+
+<!-- INTEGRATION / BALANCE -->
+<script src="audio_wiring.js"></script>
+<script src="balance.js"></script>
+
+<!-- MAIN GAME LAST -->
+<script src="game.js"></script>
+
+<!-- OPTIONAL MOBILE SUPPORT -->
+<!-- <script src="mobile.js"></script> -->
+
+<!-- POST-LOAD HOOKS -->
+<script>
+if (typeof installSubtitleOverride === "function") {
+    installSubtitleOverride();
+}
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js")
+            .then((reg) => {
+                console.log("Dark magic activated 🕯");
+
+                // Pre-cache priority audio when idle
+                if (reg.active && navigator.connection) {
+                    // Only on wifi/ethernet — don't burn mobile data
+                    const conn = navigator.connection;
+                    if (conn.type === "wifi" || conn.type === "ethernet" ||
+                        conn.effectiveType === "4g") {
+                        reg.active.postMessage("precache-audio");
+                    }
+                } else if (reg.active) {
+                    // No connection API — pre-cache anyway
+                    reg.active.postMessage("precache-audio");
+                }
+            })
+            .catch((err) => console.log("SW failed:", err));
+    });
+}
+</script>
+</body>
+</html>

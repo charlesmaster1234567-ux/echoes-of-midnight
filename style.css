@@ -1,0 +1,211 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+body {
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Georgia', 'Times New Roman', serif;
+}
+
+canvas {
+    display: block;
+    cursor: none;
+}
+
+#dialogBox {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 700px;
+    max-width: 90vw;
+    background: rgba(5, 5, 15, 0.95);
+    border: 2px solid #334;
+    border-radius: 8px;
+    padding: 20px 25px;
+    color: #ccc;
+    font-size: 16px;
+    line-height: 1.6;
+    z-index: 100;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.8), inset 0 0 60px rgba(20, 20, 40, 0.3);
+}
+
+#dialogSpeaker {
+    color: #8af;
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+#dialogText {
+    min-height: 40px;
+    font-style: italic;
+}
+
+#dialogContinue {
+    text-align: right;
+    color: #666;
+    animation: blink 1s infinite;
+    margin-top: 8px;
+    font-size: 14px;
+}
+
+#dialogChoices {
+    margin-top: 10px;
+}
+
+#dialogChoices div {
+    padding: 8px 12px;
+    margin: 4px 0;
+    background: rgba(40, 40, 80, 0.5);
+    border: 1px solid #445;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #aaa;
+}
+
+#dialogChoices div:hover {
+    background: rgba(60, 60, 120, 0.7);
+    border-color: #88f;
+    color: #fff;
+}
+
+#inventory {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 6px;
+    z-index: 90;
+    flex-wrap: wrap;
+    max-width: 300px;
+}
+
+#inventory .inv-item {
+    width: 44px;
+    height: 44px;
+    background: rgba(10, 10, 30, 0.85);
+    border: 1px solid #334;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+}
+
+#inventory .inv-item:hover {
+    border-color: #88f;
+    transform: scale(1.1);
+}
+
+#inventory .inv-item .tooltip {
+    display: none;
+    position: absolute;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.95);
+    border: 1px solid #556;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    color: #aaa;
+    font-family: 'Georgia', serif;
+}
+
+#inventory .inv-item:hover .tooltip {
+    display: block;
+}
+
+#journal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 500px;
+    max-width: 90vw;
+    max-height: 70vh;
+    background: rgba(10, 8, 5, 0.97);
+    border: 2px solid #554433;
+    border-radius: 8px;
+    padding: 25px;
+    color: #aa9977;
+    z-index: 200;
+    overflow-y: auto;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.9);
+}
+
+#journal h2 {
+    text-align: center;
+    color: #ccaa77;
+    margin-bottom: 15px;
+    font-size: 22px;
+}
+
+#journalContent {
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+#journalContent .journal-entry {
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #332211;
+}
+
+#journalContent .journal-loop {
+    color: #665544;
+    font-size: 12px;
+}
+
+#journalContent .journal-clue {
+    color: #ddaa55;
+}
+
+#journalClose {
+    text-align: center;
+    margin-top: 15px;
+    color: #665544;
+    cursor: pointer;
+    font-size: 14px;
+    letter-spacing: 2px;
+}
+
+#journalClose:hover {
+    color: #ccaa77;
+}
+
+.hidden {
+    display: none !important;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+}
+::-webkit-scrollbar-track {
+    background: #111;
+}
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
