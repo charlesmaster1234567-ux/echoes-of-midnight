@@ -530,6 +530,27 @@
             overflow: hidden;
         }
 
+        /* ── AI Status Indicator (subtle, top-left corner) ── */
+        #aiStatus {
+            position: fixed;
+            top: 8px;
+            left: 8px;
+            font: 9px 'Courier New', monospace;
+            color: rgba(150, 150, 200, 0.35);
+            z-index: 95;
+            pointer-events: none;
+            letter-spacing: 1px;
+            transition: color 0.5s;
+        }
+
+        #aiStatus.online {
+            color: rgba(100, 200, 150, 0.4);
+        }
+
+        #aiStatus.offline {
+            color: rgba(200, 100, 100, 0.35);
+        }
+
         .hidden {
             display: none !important;
         }
@@ -600,6 +621,7 @@
         <div id="journalClose">[ CLOSE — J ]</div>
     </div>
 
+    <div id="aiStatus">◌ AI: connecting...</div>
 
 <!-- ═════════════════════════════════════════════════════════════ -->
 <!--  DATA                                                          -->
@@ -673,6 +695,14 @@
 <script src="cinema.js"></script>
 
 <!-- ═════════════════════════════════════════════════════════════ -->
+<!--  AI INTEGRATION (online-first, offline-resilient)              -->
+<!--  Load AFTER subtitle_system, BEFORE gameplay scripts so it     -->
+<!--  can install its subtitle authority wrapper before any system  -->
+<!--  starts firing subtitles.                                      -->
+<!-- ═════════════════════════════════════════════════════════════ -->
+<script src="ai.js"></script>
+
+<!-- ═════════════════════════════════════════════════════════════ -->
 <!--  GAMEPLAY SYSTEMS                                              -->
 <!-- ═════════════════════════════════════════════════════════════ -->
 <script src="story_engine.js"></script>
@@ -689,141 +719,20 @@
 <script src="balance.js"></script>
 
 <!-- ═════════════════════════════════════════════════════════════ -->
-<!--  MAIN GAME ENGINE                                              -->
+<!--  MAIN GAME (LAST)                                              -->
 <!-- ═════════════════════════════════════════════════════════════ -->
 <script src="game.js"></script>
 
 <!-- ═════════════════════════════════════════════════════════════ -->
-<!--  CONTROLS — Pause / Resume / Restart System                    -->
-<!--  Must load AFTER game.js (hooks into render)                   -->
+<!--  MOBILE SUPPORT                                                -->
 <!-- ═════════════════════════════════════════════════════════════ -->
-<script src="controls.js"></script>
-
-<!-- ═════════════════════════════════════════════════════════════ -->
-<!--  MOBILE SUPPORT — Auto-detected, loads only on phones          -->
-<!-- ═════════════════════════════════════════════════════════════ -->
-<script>
-(function() {
-    "use strict";
-
-    const PHONE_THRESHOLD = 4;
-    let score = 0;
-    const evidence = [];
-
-    const UA = navigator.userAgent || "";
-    const PHONE_UA = /Android(?!.*Tablet).*Mobile|iPhone|iPod|Windows Phone|BlackBerry|BB10|Opera Mini|IEMobile|Mobile.*Firefox/i;
-    const TABLET_UA = /iPad|Android(?!.*Mobile)|Tablet|Kindle|Silk|PlayBook/i;
-
-    if (PHONE_UA.test(UA) && !TABLET_UA.test(UA)) {
-        score++;
-        evidence.push("UA:phone");
-    } else if (TABLET_UA.test(UA)) {
-        evidence.push("UA:tablet(excluded)");
-    } else {
-        evidence.push("UA:desktop");
-    }
-
-    const maxTouch = navigator.maxTouchPoints || 0;
-    if (maxTouch >= 5) {
-        score++;
-        evidence.push("Touch:" + maxTouch);
-    } else {
-        evidence.push("Touch:" + maxTouch + "(low)");
-    }
-
-    const dpr = window.devicePixelRatio || 1;
-    const physW = screen.width / dpr;
-    const physH = screen.height / dpr;
-    const shortSide = Math.min(physW, physH);
-
-    if (shortSide <= 480 && shortSide >= 280) {
-        score++;
-        evidence.push("ScreenShort:" + Math.round(shortSide) + "px(phone)");
-    } else if (shortSide > 600) {
-        evidence.push("ScreenShort:" + Math.round(shortSide) + "px(tablet/desktop)");
-    } else {
-        evidence.push("ScreenShort:" + Math.round(shortSide) + "px(borderline)");
-    }
-
-    const hasCoarse = window.matchMedia("(pointer: coarse)").matches;
-    const hasFine = window.matchMedia("(pointer: fine)").matches;
-    const hasHover = window.matchMedia("(hover: hover)").matches;
-
-    if (hasCoarse && !hasFine && !hasHover) {
-        score++;
-        evidence.push("Pointer:coarse-only");
-    } else if (hasCoarse && hasFine) {
-        evidence.push("Pointer:coarse+fine(hybrid)");
-    } else {
-        evidence.push("Pointer:fine(mouse)");
-    }
-
-    if (dpr >= 2 && shortSide <= 480) {
-        score++;
-        evidence.push("DPR:" + dpr + "(phone-range)");
-    } else {
-        evidence.push("DPR:" + dpr + "(not decisive)");
-    }
-
-    const hasOrientation = (
-        typeof window.orientation !== "undefined" ||
-        (typeof screen.orientation !== "undefined" &&
-         typeof screen.orientation.type === "string")
-    );
-    if (hasOrientation && maxTouch > 0) {
-        score++;
-        evidence.push("Orientation:supported");
-    } else {
-        evidence.push("Orientation:absent");
-    }
-
-    const plat = (navigator.platform || "").toLowerCase();
-    const isIOSPhone = /iphone|ipod/.test(plat);
-    const isAndroidArm = /linux arm|linux aarch/.test(plat) && maxTouch > 0;
-    const isIOSUA = /iPhone|iPod/.test(UA);
-
-    if (isIOSPhone || isAndroidArm || isIOSUA) {
-        score++;
-        evidence.push("Platform:phone");
-    } else {
-        evidence.push("Platform:" + (plat || "unknown"));
-    }
-
-    const IS_PHONE = score >= PHONE_THRESHOLD;
-
-    window._mobileDetection = {
-        isPhone: IS_PHONE,
-        score: score,
-        threshold: PHONE_THRESHOLD,
-        evidence: evidence,
-        dpr: dpr,
-        shortSide: shortSide,
-    };
-
-    if (IS_PHONE) {
-        console.log(
-            "[Mobile] Phone detected (score " + score + "/" + PHONE_THRESHOLD + "). " +
-            "Loading touch controls. Evidence: " + evidence.join(", ")
-        );
-        var s = document.createElement("script");
-        s.src = "mobile.js";
-        s.async = false;
-        document.currentScript
-            ? document.currentScript.parentNode.insertBefore(s, document.currentScript.nextSibling)
-            : document.body.appendChild(s);
-    } else {
-        console.log(
-            "[Mobile] Non-phone device (score " + score + "/" + PHONE_THRESHOLD + "). " +
-            "Touch controls disabled. Evidence: " + evidence.join(", ")
-        );
-    }
-})();
-</script>
+<script src="mobile.js"></script>
 
 <!-- ═════════════════════════════════════════════════════════════ -->
 <!--  POST-LOAD HOOKS                                               -->
 <!-- ═════════════════════════════════════════════════════════════ -->
 <script>
+// Install subtitle override if defined by game scripts
 if (typeof installSubtitleOverride === "function") {
     try { installSubtitleOverride(); } catch(e) {
         console.warn("[init] installSubtitleOverride failed:", e);
@@ -831,15 +740,93 @@ if (typeof installSubtitleOverride === "function") {
 }
 </script>
 
-<!-- ═════════════════════════════════════════════════════════════ -->
-<!--  SERVICE WORKER — Offline Play                                 -->
-<!-- ═════════════════════════════════════════════════════════════ -->
 <script>
+// ═══════════════════════════════════════════════════════
+//  AI SYSTEM INITIALIZATION
+//  Boots the AI integration layer asynchronously.
+//  Never blocks game startup — game runs offline
+//  perfectly fine even if AI never initializes.
+// ═══════════════════════════════════════════════════════
+(function() {
+    if (typeof AI === "undefined" || typeof AI.init !== "function") {
+        console.warn("[init] AI module not loaded — game runs offline-only");
+        return;
+    }
+
+    AI.init()
+        .then(function() {
+            console.log("[init] AI initialized in mode:", AI.mode);
+            _updateAIStatusBadge();
+        })
+        .catch(function(err) {
+            console.warn("[init] AI init failed:", err);
+            _updateAIStatusBadge();
+        });
+
+    // ── AI status badge updater ────────────────────────
+    function _updateAIStatusBadge() {
+        const badge = document.getElementById("aiStatus");
+        if (!badge) return;
+
+        if (!AI.initialized) {
+            badge.textContent = "◌ AI: connecting...";
+            badge.className   = "";
+            return;
+        }
+
+        if (AI.mode === "online" && AI.available) {
+            badge.textContent = "● AI: live";
+            badge.className   = "online";
+        } else {
+            badge.textContent = "○ AI: offline mode";
+            badge.className   = "offline";
+        }
+    }
+
+    // Re-check status every 10 seconds so the badge stays accurate
+    // even if connection drops or all keys exhaust mid-game.
+    setInterval(_updateAIStatusBadge, 10000);
+
+    // Hide badge entirely after 8 seconds — keeps UI clean
+    // Only shows again briefly on mode changes
+    setTimeout(function() {
+        const badge = document.getElementById("aiStatus");
+        if (badge) badge.style.transition = "opacity 2s";
+        if (badge) badge.style.opacity    = "0";
+    }, 8000);
+
+    // Show badge again briefly when mode changes
+    let lastMode = null;
+    setInterval(function() {
+        if (typeof AI === "undefined") return;
+        if (AI.mode !== lastMode) {
+            lastMode = AI.mode;
+            const badge = document.getElementById("aiStatus");
+            if (badge) {
+                badge.style.opacity = "1";
+                _updateAIStatusBadge();
+                setTimeout(function() {
+                    if (badge) badge.style.opacity = "0";
+                }, 3000);
+            }
+        }
+    }, 2000);
+})();
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  SERVICE WORKER REGISTRATION
+//  Enables offline play after first visit.
+//  Pre-caches priority audio on wifi connections.
+// ═══════════════════════════════════════════════════════
 if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
         navigator.serviceWorker.register("sw.js")
             .then((reg) => {
                 console.log("Dark magic activated 🕯");
+
+                // Pre-cache priority audio when on wifi
                 if (reg.active && navigator.connection) {
                     const conn = navigator.connection;
                     if (conn.type === "wifi" || conn.type === "ethernet" ||
@@ -854,5 +841,29 @@ if ("serviceWorker" in navigator) {
     });
 }
 </script>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  GLOBAL ERROR HANDLERS
+//  Catches unhandled promise rejections from AI requests
+//  so they don't show up as red errors in the console
+//  if the API is offline.
+// ═══════════════════════════════════════════════════════
+window.addEventListener("unhandledrejection", function(e) {
+    // Silently swallow AI-related rejections — they are expected
+    // when offline or when the API has issues.
+    if (e.reason && typeof e.reason === "object") {
+        const msg = String(e.reason.message || e.reason || "");
+        if (msg.indexOf("ai") !== -1 ||
+            msg.indexOf("fetch") !== -1 ||
+            msg.indexOf("AbortError") !== -1 ||
+            msg.indexOf("NetworkError") !== -1) {
+            e.preventDefault();
+            return;
+        }
+    }
+});
+</script>
+
 </body>
 </html>

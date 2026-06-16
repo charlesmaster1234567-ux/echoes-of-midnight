@@ -4,7 +4,7 @@
 #  Uses ImageMagick (magick) — no pip, no Pillow, nothing to install
 #
 #  Requirements:
-#      ImageMagick installed (you already have it)
+#      ImageMagick installed (I already have it)
 #
 #  Usage:
 #      python icon_generator.py

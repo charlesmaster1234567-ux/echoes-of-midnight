@@ -1,9 +1,9 @@
 // ═════════════════════════════════════════════════════════════════
-//  ECHOES OF MIDNIGHT — Clean Engine v5.1 "Smooth Motion Patch"
-//  PATCH ONLY — original v5.0 preserved, 3 surgical changes:
-//  1. Delta-time movement (no frame-rate dependency)
-//  2. Visual interpolation spring (no jump stutter)
-//  3. Door crash fix (_snapPlayerSpring at right moment)
+//  ECHOES OF MIDNIGHT — Clean Engine v5.2 "AI Integration Patch"
+//  PATCH ONLY — original v5.1 preserved, 3 surgical AI changes:
+//  1. AI.update() in main loop (ambient + whisper + prefetch)
+//  2. AI.reset() in loop reset (preserves cache across loops)
+//  3. AI pre-menu horror dialogue (intercepts first menu input)
 // ═════════════════════════════════════════════════════════════════
 
 "use strict";
@@ -85,11 +85,49 @@ window.addEventListener("keydown", e => {
 
 window.addEventListener("keyup", e => { keys[e.code] = false; });
 
+// ═════════════════════════════════════════════════════════════════
+//  CANVAS CLICK HANDLER — UPDATED FOR AI MENU DIALOGUE
+// ═════════════════════════════════════════════════════════════════
 canvas.addEventListener("click", () => {
     _ensureAudio();
-    if (gameState === "menu")                         startNewGame();
-    else if (gameState === "playing" && dialogActive)  advanceDialog();
-    else if (gameState === "ending")                   gameState = "menu";
+
+    if (gameState === "menu") {
+        // AI horror dialogue intercept — active dialogue
+        if (typeof AI !== "undefined" && AI.isMenuDialogueActive &&
+            AI.isMenuDialogueActive()) {
+            try {
+                const done = AI.advanceMenuDialogue();
+                if (done) window._menuDialogueDone = true;
+            } catch (_) {}
+            return;
+        }
+
+        // First click triggers AI dialogue
+        if (!window._menuDialogueStarted && !window._menuDialogueDone &&
+            typeof AI !== "undefined" && AI.startMenuDialogue) {
+            try {
+                window._menuDialogueStarted = true;
+                AI.startMenuDialogue();
+                AI.advanceMenuDialogue();
+                return;
+            } catch (_) {
+                window._menuDialogueDone = true;
+            }
+        }
+
+        // Normal click → start game
+        startNewGame();
+        window._menuDialogueStarted = false;
+        window._menuDialogueDone    = false;
+    }
+    else if (gameState === "playing" && dialogActive) {
+        advanceDialog();
+    }
+    else if (gameState === "ending") {
+        gameState = "menu";
+        window._menuDialogueStarted = false;
+        window._menuDialogueDone    = false;
+    }
 });
 
 if (journalClose) {
@@ -135,26 +173,19 @@ let _lightingCtx    = null;
 //  Visual position: sub-pixel smoothed, never jumps.
 // ═════════════════════════════════════════════════════════════════
 
-// Visual (rendered) player position — follows logical with smoothing
 let _visX = 400;
 let _visY = 480;
 
-// Smoothing factor: 1.0 = instant (no smoothing), 0.0 = never moves
-// 0.25 = reaches 98% of target in ~15 frames — silky, no lag
 const VIS_SMOOTH = 0.25;
 
-// Call every frame BEFORE render. Lerps visual toward logical.
 function _updateVisualPosition() {
     _visX += (game.playerX - _visX) * VIS_SMOOTH;
     _visY += (game.playerY - _visY) * VIS_SMOOTH;
 
-    // Snap when close enough to avoid infinite micro-drift
     if (Math.abs(game.playerX - _visX) < 0.08) _visX = game.playerX;
     if (Math.abs(game.playerY - _visY) < 0.08) _visY = game.playerY;
 }
 
-// PATCH #3 — snap visual to logical instantly (room transitions,
-// unstuck, new game). Prevents the spring pulling from the old room.
 function _snapVisualPosition() {
     _visX = game.playerX;
     _visY = game.playerY;
@@ -471,9 +502,6 @@ function changeRoom(roomId) {
     transitionState = "fadeOut";
     transitionAlpha = 0;
 
-    // PATCH #3 — snap INSIDE the callback, after position is set.
-    // This is what was crashing before: snap was called before
-    // game.playerX/Y were updated to the new room spawn.
     transitionCallback = () => {
         game.currentRoom = roomId;
 
@@ -484,7 +512,6 @@ function changeRoom(roomId) {
         game.playerX = spawn.x;
         game.playerY = spawn.y;
 
-        // NOW snap visual — position is correct at this point
         _snapVisualPosition();
 
         if (!roomsVisited.has(roomId)) {
@@ -540,7 +567,6 @@ function updatePlayer() {
         consumeKey("Backquote");
     }
 
-    // ── U-KEY: random unstuck ────────────────────────────────────
     if (keysJustPressed["KeyU"]) {
         consumeKey("KeyU");
         const r = getCurrentRoom();
@@ -563,7 +589,7 @@ function updatePlayer() {
             }
             game.playerX = fx;
             game.playerY = fy;
-            _snapVisualPosition();   // snap so no slide from old position
+            _snapVisualPosition();
         }
         return;
     }
@@ -571,12 +597,6 @@ function updatePlayer() {
     const room = getCurrentRoom();
     if (!room) return;
 
-    // ── PATCH #2 — Movement ──────────────────────────────────────
-    // Speed is kept at 3 px/frame (same feel as before).
-    // The ONLY change: we move game.playerX/Y (logical) by 3.
-    // Visual position (_visX/_visY) is smoothed separately in
-    // _updateVisualPosition() — called every frame unconditionally.
-    // This eliminates the jump because the visual never teleports.
     const speed = 3;
     let dx = 0, dy = 0;
     if (keys["ArrowLeft"]  || keys["KeyA"]) dx = -1;
@@ -616,7 +636,6 @@ function updatePlayer() {
         _safe(window.trackFootprints, game.playerX, game.playerY, game.playerAngle, true);
     }
 
-    // ── Flashlight ────────────────────────────────────────────────
     if (game.flashlightBattery < 0) game.flashlightBattery = 0;
 
     if (keysJustPressed["KeyF"]) {
@@ -633,14 +652,12 @@ function updatePlayer() {
         consumeKey("KeyR");
     }
 
-    // ── Interact ─────────────────────────────────────────────────
     if (keysJustPressed["KeyE"] || keysJustPressed["Space"]) {
         consumeKey("KeyE"); consumeKey("Space");
         keys["KeyE"] = false; keys["Space"] = false;
         _interact();
     }
 
-    // ── Attack ───────────────────────────────────────────────────
     if (keysJustPressed["KeyQ"]) {
         if (typeof combat !== "undefined" && combat.attackCooldown <= 0) {
             _safe(window.performAttack);
@@ -648,13 +665,11 @@ function updatePlayer() {
         consumeKey("KeyQ");
     }
 
-    // ── Journal ──────────────────────────────────────────────────
     if (keysJustPressed["KeyM"]) {
         _toggleJournal();
         consumeKey("KeyM");
     }
 
-    // ── Interaction target detection ─────────────────────────────
     game.interactTarget = null;
     let closestDist = 65;
 
@@ -774,7 +789,7 @@ function _toggleJournal() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-//  RENDERING — uses _visX/_visY for player and camera
+//  RENDERING
 // ═════════════════════════════════════════════════════════════════
 function render() {
     const room = getCurrentRoom();
@@ -784,7 +799,6 @@ function render() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, cw, ch);
 
-    // Camera — feed VISUAL position so camera is also smooth
     try {
         if (typeof updateCinema === "function") {
             updateCinema(_visX, _visY, game.currentRoom);
@@ -810,11 +824,9 @@ function render() {
         ctx.translate(-room.width / 2, -room.height / 2);
     }
 
-    // Floor
     ctx.fillStyle = room.floorColor || "#111";
     ctx.fillRect(0, 0, room.width, room.height);
 
-    // Perspective floor (Cinema) or flat grid fallback
     if (typeof Camera !== "undefined" && typeof Camera.drawPerspectiveFloor === "function") {
         try { Camera.drawPerspectiveFloor(ctx, room.width, room.height); } catch (_) {}
     } else {
@@ -828,7 +840,6 @@ function render() {
         }
     }
 
-    // Walls
     ctx.fillStyle = room.wallColor || "#222";
     ctx.fillRect(0, 0, room.width, 20);
     ctx.fillRect(0, 0, 20, room.height);
@@ -851,12 +862,10 @@ function render() {
         try { SetPieces.draw(ctx); } catch (_) {}
     }
 
-    // Depth fog (Cinema)
     if (typeof Camera !== "undefined" && typeof Camera.drawDepthFog === "function") {
         try { Camera.drawDepthFog(ctx, room.width, room.height); } catch (_) {}
     }
 
-    // Ambient flicker (Cinema)
     if (typeof Camera !== "undefined" && typeof Camera.drawAmbientFlicker === "function") {
         try { Camera.drawAmbientFlicker(ctx, room.width, room.height); } catch (_) {}
     }
@@ -865,7 +874,6 @@ function render() {
 
     ctx.restore();
 
-    // Post-camera overlays
     try { _drawSanityEffects(); } catch (_) {}
 
     if (typeof Camera !== "undefined") {
@@ -1071,7 +1079,6 @@ function _drawDoors(room) {
 
         const cx   = d.x + d.w / 2;
         const cy   = d.y + d.h / 2;
-        // Use logical position for interaction distance
         const dist = Math.hypot(game.playerX - cx, game.playerY - cy);
         if (dist < 75) {
             ctx.fillStyle = `rgba(255,200,100,${(0.12 * (1 - dist / 75)).toFixed(3)})`;
@@ -1147,24 +1154,20 @@ function _drawGhosts(room) {
     }
 }
 
-// ─── PLAYER DRAW — uses visual position ─────────────────────────
+// ─── PLAYER DRAW ────────────────────────────────────────────────
 function _drawPlayer() {
     ctx.save();
-    ctx.translate(_visX, _visY);   // ← visual position, not logical
+    ctx.translate(_visX, _visY);
 
-    // Shadow
     ctx.fillStyle = "rgba(0,0,0,0.3)";
     ctx.beginPath(); ctx.ellipse(0, 10, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
 
-    // Body
     ctx.fillStyle = "#445566";
     ctx.beginPath(); ctx.arc(0, 0, 10, 0, Math.PI * 2); ctx.fill();
 
-    // Head
     ctx.fillStyle = "#ddc8a0";
     ctx.beginPath(); ctx.arc(0, -8, 6, 0, Math.PI * 2); ctx.fill();
 
-    // Flashlight beam
     if (game.flashlightOn && game.flashlightBattery > 0) {
         ctx.strokeStyle = "#ffdd88"; ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1176,7 +1179,7 @@ function _drawPlayer() {
     ctx.restore();
 }
 
-// ─── LIGHTING — uses visual position ────────────────────────────
+// ─── LIGHTING ───────────────────────────────────────────────────
 function _drawLighting(room) {
     if (!_lightingCanvas) {
         _lightingCanvas = document.createElement("canvas");
@@ -1200,7 +1203,6 @@ function _drawLighting(room) {
 
     dCtx.globalCompositeOperation = "destination-out";
 
-    // Use visual position so flashlight doesn't stutter
     const lx = _visX;
     const ly = _visY;
 
@@ -1448,8 +1450,12 @@ function _drawMinimap() {
 // ─── DEBUG ──────────────────────────────────────────────────────
 function _drawDebugOverlay() {
     ctx.fillStyle = "rgba(0,0,0,0.7)";
-    ctx.fillRect(canvas.width - 260, 80, 250, 220);
+    ctx.fillRect(canvas.width - 260, 80, 250, 240);
     ctx.fillStyle = "#0f0"; ctx.font = "11px monospace"; ctx.textAlign = "left";
+
+    const aiMode = (typeof AI !== "undefined" && AI.mode) ? AI.mode : "n/a";
+    const aiCache = (typeof AI !== "undefined" && AI.runtimeCache)
+        ? Object.keys(AI.runtimeCache).length : 0;
 
     const lines = [
         `Frame: ${frame}`,
@@ -1464,6 +1470,8 @@ function _drawDebugOverlay() {
         `Particles: ${typeof particles !== "undefined" ? particles.length : "-"}`,
         `XP: ${game.xp}/${game.xpToNext}`,
         `Trans: ${transitionState} α=${transitionAlpha.toFixed(2)}`,
+        `AI Mode: ${aiMode}`,
+        `AI Cache: ${aiCache} entries`,
     ];
 
     let y = 100;
@@ -1542,7 +1550,7 @@ function triggerLoopReset(customMessage) {
         interactTarget: null,
     });
 
-    _snapVisualPosition();   // reset visual to foyer spawn
+    _snapVisualPosition();
 
     if (saved.perm.hasFirstSeal)  addItem("seal_1", "🔮", "Seal Fragment #1");
     if (saved.perm.hasSecondSeal) addItem("seal_2", "🔮", "Seal Fragment #2");
@@ -1558,18 +1566,21 @@ function triggerLoopReset(customMessage) {
     _safe(window.resetEventState);
     _safe(window.resetCombat);
     _safe(window.resetNPCs);
-        if (typeof StoryEngine  !== "undefined" && StoryEngine.reset)   try { StoryEngine.reset(); }   catch (_) {}
+    if (typeof StoryEngine  !== "undefined" && StoryEngine.reset)   try { StoryEngine.reset(); }   catch (_) {}
     if (typeof Monologue    !== "undefined" && Monologue.reset)     try { Monologue.reset(); }     catch (_) {}
     if (typeof HouseDecay   !== "undefined" && HouseDecay.reset)    try { HouseDecay.reset(); }    catch (_) {}
     if (typeof SetPieces    !== "undefined" && SetPieces.reset)     try { SetPieces.reset(); }     catch (_) {}
 
-    // ── NEW: Stop audio BEFORE resetting timers ──────────────────
+    // ── Stop audio BEFORE resetting timers ──────────────────────
     if (typeof AudioWiring   !== "undefined" && AudioWiring.cancelPendingDelays) try { AudioWiring.cancelPendingDelays(); } catch (_) {}
     if (typeof AudioTriggers !== "undefined" && AudioTriggers.stopAllVoices)     try { AudioTriggers.stopAllVoices(); }     catch (_) {}
 
     if (typeof AudioWiring   !== "undefined" && AudioWiring.reset)   try { AudioWiring.reset(); }   catch (_) {}
     if (typeof Balance       !== "undefined" && Balance.reset)       try { Balance.reset(); }       catch (_) {}
     if (typeof AudioTriggers !== "undefined" && AudioTriggers.reset) try { AudioTriggers.reset(); } catch (_) {}
+
+    // ── AI: reset timing state for new loop (preserves cache) ──
+    if (typeof AI !== "undefined" && AI.reset) try { AI.reset(); } catch (_) {}
 
     _safe(window.setupWeatherForRoom, "foyer");
     _safe(window.saveGame);
@@ -1797,7 +1808,7 @@ function startNewGame() {
     _lastInteractFrame  = -100;
     _interactInProgress = false;
 
-    _snapVisualPosition();   // start visual at foyer
+    _snapVisualPosition();
 
     updateInventoryUI();
     _safe(window.setupWeatherForRoom, "foyer");
@@ -1819,7 +1830,6 @@ function startNewGame() {
 function gameLoop() {
     frame = (frame + 1) % 1000000;
 
-    // ── Memory cleaner ───────────────────────────────────────────
     if (frame % MEMORY_CLEAN_INTERVAL === 0) {
         try {
             if (typeof particles   !== "undefined" && particles.length   > MAX_PARTICLES_ALLOWED)  particles.splice(0, particles.length   - MAX_PARTICLES_ALLOWED);
@@ -1835,9 +1845,52 @@ function gameLoop() {
 
             case "menu":
                 try { _drawMenu(); } catch (_) {}
+
+                // ── AI PRE-MENU HORROR DIALOGUE ─────────────────
+                // If AI dialogue is active, any key advances it.
+                // Suppresses normal menu input until dialogue completes.
+                if (typeof AI !== "undefined" && AI.isMenuDialogueActive &&
+                    AI.isMenuDialogueActive()) {
+                    if (keysJustPressed["Enter"] || keysJustPressed["Space"] ||
+                        keysJustPressed["KeyE"]) {
+                        _ensureAudio();
+                        try {
+                            const done = AI.advanceMenuDialogue();
+                            if (done) window._menuDialogueDone = true;
+                        } catch (_) {}
+                        consumeKey("Enter");
+                        consumeKey("Space");
+                        consumeKey("KeyE");
+                    }
+                    break;
+                }
+
+                // First keypress starts AI horror dialogue
+                if (!window._menuDialogueStarted && !window._menuDialogueDone &&
+                    (keysJustPressed["Enter"] || keysJustPressed["Space"])) {
+                    if (typeof AI !== "undefined" && AI.startMenuDialogue) {
+                        try {
+                            _ensureAudio();
+                            window._menuDialogueStarted = true;
+                            AI.startMenuDialogue();
+                            AI.advanceMenuDialogue();
+                            consumeKey("Enter");
+                            consumeKey("Space");
+                            break;
+                        } catch (_) {
+                            window._menuDialogueDone = true;
+                        }
+                    }
+                }
+
+                // Normal menu input (after dialogue done or AI unavailable)
                 if (keysJustPressed["Enter"] || keysJustPressed["Space"]) {
-                    _ensureAudio(); startNewGame();
-                    consumeKey("Enter"); consumeKey("Space");
+                    _ensureAudio();
+                    startNewGame();
+                    window._menuDialogueStarted = false;
+                    window._menuDialogueDone    = false;
+                    consumeKey("Enter");
+                    consumeKey("Space");
                 }
                 if (keysJustPressed["KeyC"] && typeof loadGame === "function") {
                     try {
@@ -1848,6 +1901,8 @@ function gameLoop() {
                             if (typeof applySaveData === "function") applySaveData(sd);
                             updateInventoryUI();
                             showDialog("SYSTEM", "Game loaded.");
+                            window._menuDialogueStarted = false;
+                            window._menuDialogueDone    = false;
                         }
                     } catch (_) {}
                     consumeKey("KeyC");
@@ -1858,9 +1913,6 @@ function gameLoop() {
                 try { updatePlayer(); }    catch (_) {}
                 try { updateLoopTimer(); } catch (_) {}
 
-                // ── PATCH #1 — update visual every frame ─────────
-                // Must run after updatePlayer so logical pos is current
-                // Must run before render so visual pos is ready
                 try { _updateVisualPosition(); } catch (_) {}
 
                 try { if (typeof updateParticles === "function") updateParticles(); } catch (_) {}
@@ -1868,6 +1920,9 @@ function gameLoop() {
                 _safe(window.updateCombat);
                 _safe(window.updateNPCs);
                 _safe(window.updateAutoSave);
+
+                // ── AI INTEGRATION — fire-and-forget, never blocks ──
+                try { if (typeof AI !== "undefined" && AI.update) AI.update(); } catch (_) {}
 
                 if (typeof SubtitleSystem !== "undefined" && SubtitleSystem.update) { try { SubtitleSystem.update(); } catch (_) {} }
                 if (typeof AudioManager   !== "undefined" && AudioManager.initialized) { try { AudioManager.update(game.currentRoom); } catch (_) {} }
@@ -1890,6 +1945,8 @@ function gameLoop() {
                 try { _drawEnding(); } catch (_) {}
                 if (keysJustPressed["Enter"] || keysJustPressed["Space"]) {
                     gameState = "menu";
+                    window._menuDialogueStarted = false;
+                    window._menuDialogueDone    = false;
                     consumeKey("Enter"); consumeKey("Space");
                 }
                 break;
