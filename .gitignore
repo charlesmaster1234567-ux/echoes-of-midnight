@@ -122,3 +122,12 @@ $RECYCLE.BIN/
 *~
 .sass-cache/
 .eslintcache
+
+
+# Backup folders
+ai_cleanup_backup_*/
+icons_backup/
+*.backup
+*.backup2
+game.js.backup2
+index.html.backup
