@@ -16,7 +16,7 @@
 "use strict";
 
 // ── Version — bump this string to force a full cache refresh for all players ──
-const SW_VERSION    = "eom-v3.0.0";
+const SW_VERSION    = "eom-v3.1.0";
 
 // ── Cache bucket names ────────────────────────────────────────────────────────
 const CACHE_CORE    = SW_VERSION + "-core";       // HTML / JS / manifests
@@ -186,7 +186,7 @@ const ALL_AUDIO_FILES = [
     "/sounds/sfx/combat/defeat.mp3",
 
     // ── Voice / Dialogue ─────────────────────────────────────────────────────
-    "/sounds/voices/whisper_help.mp3",
+    "/sounds/voices/whisper_help.m4a",
     "/sounds/voices/whisper_run.mp3",
     "/sounds/voices/whisper_danger.mp3",
     "/sounds/voices/whisper_midnight.mp3",

@@ -107,7 +107,7 @@ const AudioManager = {
         sfx_rocking_horse:      "sounds/sfx/rocking_horse.mp3",
         sfx_gramophone:         "sounds/sfx/gramophone_static.mp3",
 
-        voice_whisper_1:       "sounds/voices/whisper_help.mp3",
+        voice_whisper_1:       "sounds/voices/whisper_help.m4a",
         voice_whisper_2:       "sounds/voices/whisper_run.mp3",
         voice_whisper_3:       "sounds/voices/whisper_find_me.mp3",
         voice_whisper_4:       "sounds/voices/whisper_leave.mp3",
