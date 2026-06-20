@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "savedAt": null,
+  "hasData": false,
+  "game": null,
+  "meta": {
+    "totalPlayTime": 0,
+    "sessionCount": 0,
+    "lastRoom": null,
+    "lastLevel": null,
+    "lastLoop": null
+  }
+}
