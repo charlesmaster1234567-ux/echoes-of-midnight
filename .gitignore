@@ -131,3 +131,27 @@ icons_backup/
 *.backup2
 game.js.backup2
 index.html.backup
+
+# Add patterns to .gitignore
+@"
+
+# Backups (added)
+fixer_backup_*/
+fixer_safe_backup_*/
+*.before_fix
+*.corrupted
+*.BACK
+*.backup
+*.backup2
+
+# Internal tools
+fixer*.py
+ai_cleaner.py
+echoes_downloader.py
+icon_generator.py
+icon_optimizer.py
+get_gametree.ps1
+game_tree.txt
+GAMEJS_PATCH.txt
+sounds_list.md
+"@ | Add-Content .gitignore
