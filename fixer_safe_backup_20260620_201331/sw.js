@@ -375,7 +375,7 @@ async function cacheFirst(req, cacheName) {
 async function staleWhileRevalidate(req) {
     const cached = await caches.match(req);
     const netP = fetch(req).then(async (res) => {
-        if (res.ok && res.status !== 206) { const c = await caches.open(CACHE_CORE); await c.put(req, res.clone()); }
+        if (res.ok) { const c = await caches.open(CACHE_CORE); await c.put(req, res.clone()); }
         return res;
     }).catch(() => null);
     return cached || await netP || offlineFallback(req);
@@ -384,7 +384,7 @@ async function staleWhileRevalidate(req) {
 async function networkFirst(req) {
     try {
         const res = await fetch(req);
-        if (res.ok && res.status !== 206) { const c = await caches.open(CACHE_DYNAMIC); c.put(req, res.clone()); }
+        if (res.ok) { const c = await caches.open(CACHE_DYNAMIC); c.put(req, res.clone()); }
         return res;
     } catch (e) {
         const cached = await caches.match(req);

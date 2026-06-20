@@ -1,4 +1,4 @@
-﻿// ═════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════
 //  ECHOES OF MIDNIGHT — game.js v6.1 "Splash Update"
 //  Full rewrite — splash → intro dialogue → menu → game
 //  Part 1 of 2: Constants, State, Input, Audio, Splash, Intro,
@@ -552,6 +552,36 @@ const game = {
     roomsExplored: 0, itemsFound: 0, ghostsSeen: 0,
     missionsComplete: 0, activeMissions: [], completedMissions: [],
 };
+
+// After game object is initialized (after const game = {...}):
+if (GameState.hasSave()) {
+    GameState.showContinuePrompt(
+        () => {
+            // CONTINUE
+            GameState.load();
+            GameState.startAutosave();
+            startGame(); // or whatever your play function is
+        },
+        () => {
+            // NEW GAME
+            GameState.clear();
+            GameState.startAutosave();
+            startNewGame();
+        }
+    );
+} else {
+    GameState.startAutosave();
+}
+
+// On loop reset — save immediately:
+GameState.save();
+
+// On level up — save immediately:
+GameState.save();
+
+// On game over / ending:
+GameState.stopAutosave();
+GameState.clear(); // or keep it for "continue from last loop"
 
 // ═════════════════════════════════════════════════════════════════
 //  SECTION 13 — XP & LEVELLING
@@ -1549,12 +1579,7 @@ function _drawMenu() {
 // ═════════════════════════════════════════════════════════════════
 //  SECTION 24 — START NEW GAME
 // ═════════════════════════════════════════════════════════════════
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 24 — START NEW GAME / CONTINUE
-// ═════════════════════════════════════════════════════════════════
-
-// The real "start fresh" — extracted so Continue can choose either path
-function _doStartFresh() {
+function startNewGame() {
     _stopMenuMusic();
     gameState = "playing";
 
@@ -1590,104 +1615,9 @@ function _doStartFresh() {
     if (typeof gameStats !== "undefined") gameStats.gamesPlayed++;
     _safe(window.saveGame);
 
-    if (typeof GameState !== "undefined" && GameState.startAutosave) {
-        try { GameState.startAutosave(); } catch (_) {}
-    }
-
     addClue("start", "— Loop #1 begins — You awaken in Thornwood Manor.");
     showDialog("NARRATOR", "You wake in the grand foyer of Thornwood Manor. The front door is sealed. A grandfather clock counts down to midnight.");
     showDialog("NARRATOR", "You have a flashlight. Ten minutes remain. Press E to interact with objects, J to open your journal, U if you become stuck.");
-}
-
-// Restore a previously saved game from GameState
-function _doContinue() {
-    _stopMenuMusic();
-    _safe(window.installSubtitleOverride);
-
-    // Reset transient stuff first
-    dialogQueue         = [];
-    dialogActive        = false;
-    dialogBox.classList.add("hidden");
-    journalEl.classList.add("hidden");
-    journalOpen         = false;
-    _lastInteractFrame  = -100;
-    _interactInProgress = false;
-    transitionState     = "none";
-    transitionAlpha     = 0;
-    transitionCallback  = null;
-
-    // Apply saved state via GameState
-    const ok = GameState.load();
-    if (!ok) {
-        console.warn("[Continue] Load failed — starting fresh instead");
-        _doStartFresh();
-        return;
-    }
-
-    // Sync the global roomsVisited Set with whatever was loaded
-    if (game.roomsVisited && !(game.roomsVisited instanceof Set)) {
-        game.roomsVisited = new Set(game.roomsVisited);
-    }
-    roomsVisited = game.roomsVisited || new Set([game.currentRoom || "foyer"]);
-
-    // Make sure the current room is in the visited set
-    if (game.currentRoom) roomsVisited.add(game.currentRoom);
-
-    // Refresh UI from loaded data
-    _snapVisualPosition();
-    updateInventoryUI();
-
-    // Set up audio/weather for the loaded room
-    _safe(window.setupWeatherForRoom, game.currentRoom);
-    if (typeof AudioManager !== "undefined" && AudioManager.initialized) {
-        try { AudioManager.update(game.currentRoom); } catch (_) {}
-    }
-    _safe(window.resetCombat);
-    _safe(window.initNPCs);
-
-    // Start playing
-    gameState = "playing";
-
-    // Resume autosave
-    if (GameState.startAutosave) {
-        try { GameState.startAutosave(); } catch (_) {}
-    }
-
-    // Friendly message
-    try {
-        showDialog("NARRATOR",
-            "The manor remembers you. You return to " +
-            (game.currentRoom || "the foyer").replace(/_/g, " ") +
-            " on loop " + ((game.loop || 0) + 1) + ".");
-    } catch (_) {}
-
-    console.log("[Continue] Restored: room=" + game.currentRoom +
-                " level=" + game.level + " loop=" + game.loop +
-                " pos=" + game.playerX + "," + game.playerY);
-}
-
-// Public entry — decides between Continue prompt or fresh start
-function startNewGame() {
-    _ensureAudio();
-
-    // If a save exists, ask the player
-    if (typeof GameState !== "undefined" && GameState.hasSave && GameState.hasSave()) {
-        try {
-            GameState.showContinuePrompt(
-                _doContinue,        // Continue button
-                function() {        // New Game button
-                    if (GameState.clear) { try { GameState.clear(); } catch (_) {} }
-                    _doStartFresh();
-                }
-            );
-            return;
-        } catch (e) {
-            console.warn("[startNewGame] Continue prompt failed:", e);
-        }
-    }
-
-    // No save → start fresh immediately
-    _doStartFresh();
 }
 
 // ═════════════════════════════════════════════════════════════════

@@ -1,14 +1,14 @@
-﻿// ═════════════════════════════════════════════════════════════════
-//  ECHOES OF MIDNIGHT — game.js v6.1 "Splash Update"
-//  Full rewrite — splash → intro dialogue → menu → game
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  ECHOES OF MIDNIGHT â€” game.js v6.1 "Splash Update"
+//  Full rewrite â€” splash â†’ intro dialogue â†’ menu â†’ game
 //  Part 1 of 2: Constants, State, Input, Audio, Splash, Intro,
 //               Dialog, Rooms, Player, Inventory, XP, Missions
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 "use strict";
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 1 — CONSTANTS
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 1 â€” CONSTANTS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const LOOP_DURATION            = 600;
 const MAX_DIALOG_QUEUE         = 8;
 const INTERACT_COOLDOWN_FRAMES = 30;
@@ -21,9 +21,9 @@ const VIS_SMOOTH               = 0.25;
 const MENU_LOGO_PATH           = "icons/og-image.jpg";
 const MENU_MUSIC_PATH          = "sounds/music/menu_theme.mp3";
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 2 — DOM REFERENCES
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 2 â€” DOM REFERENCES
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const canvas         = document.getElementById("gameCanvas");
 const ctx            = canvas.getContext("2d");
 const minimapCanvas  = document.getElementById("minimap");
@@ -39,9 +39,9 @@ const journalContent = document.getElementById("journalContent");
 const journalClose   = document.getElementById("journalClose");
 const levelUpNotice  = document.getElementById("levelUpNotice");
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 3 — CANVAS RESIZE
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 3 â€” CANVAS RESIZE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function resizeCanvas() {
     canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -53,17 +53,17 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 4 — SAFE CALL HELPER
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 4 â€” SAFE CALL HELPER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _safe(fn, ...args) {
     if (typeof fn !== "function") return undefined;
     try { return fn(...args); } catch (_) { return undefined; }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 5 — AUDIO BRIDGE
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 5 â€” AUDIO BRIDGE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 let audioCtx          = null;
 let _audioInitDone    = false;
 let _menuAudio        = null;
@@ -110,9 +110,9 @@ function _stopMenuMusic() {
 
 if (typeof window.playSound !== "function") window.playSound = function () {};
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 6 — INPUT SYSTEM
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 6 â€” INPUT SYSTEM
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const keys            = {};
 const keysJustPressed = {};
 
@@ -155,9 +155,9 @@ function clearJustPressed() {
     for (const k in keysJustPressed) keysJustPressed[k] = false;
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 7 — LOGO PRELOAD (needed by both splash + menu)
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 7 â€” LOGO PRELOAD (needed by both splash + menu)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 let _logoImage  = null;
 let _logoLoaded = false;
 let _logoFailed = false;
@@ -169,10 +169,10 @@ let _logoFailed = false;
     img.src     = MENU_LOGO_PATH;
 })();
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 8 — GAME STATE
-//  Flow: splash → intro → menu → playing → ending
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 8 â€” GAME STATE
+//  Flow: splash â†’ intro â†’ menu â†’ playing â†’ ending
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 let gameState          = "splash"; // splash|intro|menu|playing|ending
 let frame              = 0;
 let dialogActive       = false;
@@ -212,11 +212,11 @@ function _snapVisualPosition() {
     _visY = game.playerY;
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 9 — SPLASH SCREEN
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 9 â€” SPLASH SCREEN
 //  Pure black + logo only. No title. No menu. Just silence.
-//  First interaction → music plays → intro dialogue begins.
-// ═════════════════════════════════════════════════════════════════
+//  First interaction â†’ music plays â†’ intro dialogue begins.
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _drawSplash() {
     const cw = canvas.width;
     const ch = canvas.height;
@@ -228,7 +228,7 @@ function _drawSplash() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, cw, ch);
 
-    // Barely-visible dark red ambient pulse — like a heartbeat
+    // Barely-visible dark red ambient pulse â€” like a heartbeat
     const pulseA = 0.025 + Math.sin(t * 1.2) * 0.012;
     const pulse  = ctx.createRadialGradient(cx, cy, 0, cx, cy, cw * 0.5);
     pulse.addColorStop(0, `rgba(35,4,4,${pulseA.toFixed(4)})`);
@@ -236,7 +236,7 @@ function _drawSplash() {
     ctx.fillStyle = pulse;
     ctx.fillRect(0, 0, cw, ch);
 
-    // ── Logo ─────────────────────────────────────────────────
+    // â”€â”€ Logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (_logoLoaded && _logoImage) {
         // Keep aspect ratio, constrained size
         const maxW  = Math.min(440, cw * 0.52);
@@ -249,7 +249,7 @@ function _drawSplash() {
         const lx = cx - lw / 2;
         const ly = cy - lh / 2 - 28;
 
-        // Glow behind logo — very subtle
+        // Glow behind logo â€” very subtle
         const glowA = 0.07 + Math.sin(t * 0.9) * 0.025;
         const glow  = ctx.createRadialGradient(cx, ly + lh / 2, 0, cx, ly + lh / 2, lw * 0.65);
         glow.addColorStop(0, `rgba(90,20,20,${glowA.toFixed(4)})`);
@@ -272,7 +272,7 @@ function _drawSplash() {
         ctx.globalAlpha = 1;
 
     } else if (_logoFailed) {
-        // Image missing — show text fallback
+        // Image missing â€” show text fallback
         ctx.globalAlpha = Math.min(1, frame / 90);
         ctx.fillStyle   = "rgba(130,18,18,0.9)";
         ctx.font        = `bold ${Math.min(46, cw * 0.058)}px Georgia, serif`;
@@ -280,9 +280,9 @@ function _drawSplash() {
         ctx.fillText("ECHOES OF MIDNIGHT", cx, cy - 28);
         ctx.globalAlpha = 1;
     }
-    // If still loading: black screen — fine, logo appears shortly
+    // If still loading: black screen â€” fine, logo appears shortly
 
-    // ── "Click to enter" prompt — appears after ~2.5s ────────
+    // â”€â”€ "Click to enter" prompt â€” appears after ~2.5s â”€â”€â”€â”€â”€â”€â”€â”€
     const promptDelay = 140;
     const promptFade  = Math.min(1, Math.max(0, (frame - promptDelay) / 60));
     if (promptFade > 0) {
@@ -291,22 +291,22 @@ function _drawSplash() {
         ctx.fillStyle    = "rgba(170,150,140,1)";
         ctx.font         = `${Math.min(15, cw * 0.020)}px 'Courier New', monospace`;
         ctx.textAlign    = "center";
-        ctx.fillText("▸  CLICK OR PRESS ANY KEY TO ENTER  ◂", cx, cy + 118);
+        ctx.fillText("â–¸  CLICK OR PRESS ANY KEY TO ENTER  â—‚", cx, cy + 118);
         ctx.globalAlpha  = 1;
     }
 
-    // Thornwood signature — faint, bottom center
+    // Thornwood signature â€” faint, bottom center
     const sigFade = Math.min(0.28, Math.max(0, (frame - 80) / 120));
     if (sigFade > 0) {
         ctx.globalAlpha = sigFade;
         ctx.fillStyle   = "rgba(70,58,68,1)";
         ctx.font        = "italic 11px Georgia, serif";
         ctx.textAlign   = "center";
-        ctx.fillText("⚜  THORNWOOD MANOR  ⚜", cx, ch - 22);
+        ctx.fillText("âšœ  THORNWOOD MANOR  âšœ", cx, ch - 22);
         ctx.globalAlpha = 1;
     }
 
-    // Heavy vignette — keeps focus on logo
+    // Heavy vignette â€” keeps focus on logo
     const vig = ctx.createRadialGradient(cx, cy - 15, ch * 0.12, cx, cy - 15, cw * 0.62);
     vig.addColorStop(0, "rgba(0,0,0,0)");
     vig.addColorStop(1, "rgba(0,0,0,0.97)");
@@ -314,14 +314,14 @@ function _drawSplash() {
     ctx.fillRect(0, 0, cw, ch);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 10 — FIRST INTERACTION + INTRO SEQUENCE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 10 â€” FIRST INTERACTION + INTRO SEQUENCE
 //  Triggered once by any click/key/touch while on splash screen.
 //  1. Audio context unlocked
 //  2. Menu music starts (plays through intro AND menu)
 //  3. Horror intro dialogue begins (gameState = "intro")
-//  4. After all dialogue lines → gameState = "menu"
-// ═════════════════════════════════════════════════════════════════
+//  4. After all dialogue lines â†’ gameState = "menu"
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 let _firstInteractionDone = false;
 
 const INTRO_DIALOGUE = [
@@ -349,7 +349,7 @@ function _onFirstInteraction() {
     _ensureAudio();
     _playMenuMusic(); // music starts NOW, plays through intro and menu
 
-    // Move from splash → intro
+    // Move from splash â†’ intro
     gameState   = "intro";
     _introIndex = 0;
     _startIntroLine(0);
@@ -403,15 +403,15 @@ function _advanceIntroDialogue() {
 }
 
 function _finishIntro() {
-    // Intro done → open menu. Music keeps playing.
+    // Intro done â†’ open menu. Music keeps playing.
     gameState       = "menu";
     _introTyping    = false;
     _introDisplayed = "";
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 11 — INTRO SCREEN RENDERER
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 11 â€” INTRO SCREEN RENDERER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _drawIntro() {
     const cw = canvas.width;
     const ch = canvas.height;
@@ -446,7 +446,7 @@ function _drawIntro() {
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, cw, ch);
 
-    // ── Speaker ───────────────────────────────────────────────
+    // â”€â”€ Speaker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const line = INTRO_DIALOGUE[_introIndex] || INTRO_DIALOGUE[0];
     const SPEAKER_COLORS = {
         "???":      "#7a3838",
@@ -477,7 +477,7 @@ function _drawIntro() {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // ── Dialogue text with word wrap ──────────────────────────
+    // â”€â”€ Dialogue text with word wrap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const fontSize = Math.min(20, cw * 0.027);
     ctx.font       = `italic ${fontSize}px Georgia, serif`;
     ctx.fillStyle  = "rgba(195,178,162,0.92)";
@@ -535,9 +535,9 @@ function _drawIntro() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 12 — GAME OBJECT
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 12 â€” GAME OBJECT
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const game = {
     loop: 0, loopTime: 0, maxLoopTime: LOOP_DURATION,
     sanity: 100, maxSanity: 100,
@@ -553,9 +553,9 @@ const game = {
     missionsComplete: 0, activeMissions: [], completedMissions: [],
 };
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 13 — XP & LEVELLING
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 13 â€” XP & LEVELLING
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function giveXP(amount) {
     if (!Number.isFinite(amount) || amount <= 0) return;
     game.xp      += amount;
@@ -581,7 +581,7 @@ function _onLevelUp() {
         game.sanity     = Math.min(game.sanity + 20, game.maxSanity);
 
         if (levelUpNotice) {
-            levelUpNotice.textContent   = `⬆ LEVEL ${game.level}`;
+            levelUpNotice.textContent   = `â¬† LEVEL ${game.level}`;
             levelUpNotice.style.opacity = "1";
             if (_levelUpTimeout) clearTimeout(_levelUpTimeout);
             _levelUpTimeout = setTimeout(() => {
@@ -592,19 +592,19 @@ function _onLevelUp() {
 
         _safe(window.emitLevelUpParticles, game.playerX, game.playerY);
 
-        if      (game.level === 3)  { showDialog("SYSTEM", "Level 3 — Upstairs unlocked."); game.flags.stairsUnlocked = true; }
-        else if (game.level === 5)  showDialog("SYSTEM", "Level 5 — Your senses sharpen. The house reacts.");
-        else if (game.level === 8)  showDialog("SYSTEM", "Level 8 — Deeper areas accessible.");
-        else if (game.level === 10) showDialog("SYSTEM", "Level 10 — MASTER INVESTIGATOR. The truth is near.");
+        if      (game.level === 3)  { showDialog("SYSTEM", "Level 3 â€” Upstairs unlocked."); game.flags.stairsUnlocked = true; }
+        else if (game.level === 5)  showDialog("SYSTEM", "Level 5 â€” Your senses sharpen. The house reacts.");
+        else if (game.level === 8)  showDialog("SYSTEM", "Level 8 â€” Deeper areas accessible.");
+        else if (game.level === 10) showDialog("SYSTEM", "Level 10 â€” MASTER INVESTIGATOR. The truth is near.");
 
         addClue(`level_${game.level}`, `Reached Level ${game.level}.`);
     } finally { _levelingUp = false; }
     setTimeout(checkMissions, 0);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 14 — MISSIONS
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 14 â€” MISSIONS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const ALL_MISSIONS = [
     { id:"m_explore5",  name:"Explorer",        desc:"Visit 5 rooms",         check:()=>roomsVisited.size>=5,                          xp:30  },
     { id:"m_explore15", name:"Cartographer",    desc:"Visit 15 rooms",        check:()=>roomsVisited.size>=15,                         xp:60  },
@@ -615,7 +615,7 @@ const ALL_MISSIONS = [
     { id:"m_clue30",    name:"Master Sleuth",   desc:"Find 30 clues",         check:()=>game.cluesFound.length>=30,                    xp:100 },
     { id:"m_seal1",     name:"First Fragment",  desc:"Find 1 seal",           check:()=>countSeals()>=1,                               xp:20  },
     { id:"m_seal5",     name:"All Seals",       desc:"All 5 seals",           check:()=>countSeals()>=5,                               xp:80  },
-    { id:"m_loop2",     name:"Déjà Vu",         desc:"Survive 2 loops",       check:()=>game.loop>=2,                                  xp:20  },
+    { id:"m_loop2",     name:"DÃ©jÃ  Vu",         desc:"Survive 2 loops",       check:()=>game.loop>=2,                                  xp:20  },
     { id:"m_loop5",     name:"Time Veteran",    desc:"Survive 5 loops",       check:()=>game.loop>=5,                                  xp:50  },
     { id:"m_level5",    name:"Rising Power",    desc:"Reach Level 5",         check:()=>game.level>=5,                                 xp:30  },
     { id:"m_level10",   name:"Master",          desc:"Reach Level 10",        check:()=>game.level>=10,                                xp:60  },
@@ -639,14 +639,14 @@ function checkMissions() {
         }
     } finally { _checkingMissions = false; }
     for (const m of completed) {
-        showDialog("🏆 MISSION", `${m.name}: ${m.desc} (+${m.xp} XP)`);
+        showDialog("ðŸ† MISSION", `${m.name}: ${m.desc} (+${m.xp} XP)`);
         giveXP(m.xp);
     }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 15 — INVENTORY / ITEMS / CLUES
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 15 â€” INVENTORY / ITEMS / CLUES
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function hasItem(id)  { return game.inventory.some(i => i.id === id); }
 
 function addItem(id, icon, name) {
@@ -691,9 +691,9 @@ function updateInventoryUI() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 16 — DIALOG SYSTEM
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 16 â€” DIALOG SYSTEM
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 window._gameShowDialog            = null;
 window._gameShowDialogWithChoices = null;
 
@@ -809,9 +809,9 @@ function _handleDialogKeys() {
     return true;
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 17 — ROOMS
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 17 â€” ROOMS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function changeRoom(roomId) {
     if (typeof ROOMS === "undefined" || !ROOMS[roomId]) return;
     if (transitionState !== "none") return;
@@ -852,9 +852,9 @@ function getCurrentRoom() {
         ? (ROOMS[game.currentRoom] || null) : null;
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 18 — PLAYER UPDATE
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 18 â€” PLAYER UPDATE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function updatePlayer() {
     if (_handleDialogKeys()) return;
     if (dialogActive) return;
@@ -994,9 +994,9 @@ function _interact() {
     } finally { _interactInProgress = false; }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 19 — JOURNAL
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 19 â€” JOURNAL
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _toggleJournal() {
     journalOpen = !journalOpen;
     if (!journalOpen) { journalEl.classList.add("hidden"); return; }
@@ -1005,15 +1005,15 @@ function _toggleJournal() {
 
     const stats = document.createElement("div");
     stats.className = "journal-entry";
-    stats.innerHTML = `<div class="journal-clue">📊 Level ${game.level} | XP: ${game.xp}/${game.xpToNext} | Loop #${game.loop + 1}<br>🔮 Seals: ${countSeals()}/5 | 📍 Rooms: ${roomsVisited.size} | 🏆 ${game.completedMissions.length}</div>`;
+    stats.innerHTML = `<div class="journal-clue">ðŸ“Š Level ${game.level} | XP: ${game.xp}/${game.xpToNext} | Loop #${game.loop + 1}<br>ðŸ”® Seals: ${countSeals()}/5 | ðŸ“ Rooms: ${roomsVisited.size} | ðŸ† ${game.completedMissions.length}</div>`;
     journalContent.appendChild(stats);
 
     const missDiv = document.createElement("div");
     missDiv.className = "journal-entry";
     const active  = ALL_MISSIONS.filter(m => !game.completedMissions.includes(m.id));
     let mHTML = '<div class="journal-loop">ACTIVE MISSIONS</div>';
-    if (!active.length) { mHTML += '<div class="journal-clue">All missions complete! 🎉</div>'; }
-    else { active.slice(0,5).forEach(m => { mHTML += `<div class="journal-clue">• ${m.name}: ${m.desc}</div>`; }); }
+    if (!active.length) { mHTML += '<div class="journal-clue">All missions complete! ðŸŽ‰</div>'; }
+    else { active.slice(0,5).forEach(m => { mHTML += `<div class="journal-clue">â€¢ ${m.name}: ${m.desc}</div>`; }); }
     missDiv.innerHTML = mHTML;
     journalContent.appendChild(missDiv);
 
@@ -1039,9 +1039,9 @@ function _toggleJournal() {
     }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 20 — LOOP TIMER
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 20 â€” LOOP TIMER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function updateLoopTimer() {
     if (dialogActive || journalOpen || transitionState !== "none") return;
     game.loopTime += 1 / 60;
@@ -1050,18 +1050,18 @@ function updateLoopTimer() {
     else if (game.sanity <= 0) triggerLoopReset("Your mind shatters. Darkness consumes you. Time resets...");
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  END OF PART 1 — continue in Part 2
-// ═════════════════════════════════════════════════════════════════
-// ═════════════════════════════════════════════════════════════════
-//  ECHOES OF MIDNIGHT — game.js v6.1 Part 2 of 2
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  END OF PART 1 â€” continue in Part 2
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  ECHOES OF MIDNIGHT â€” game.js v6.1 Part 2 of 2
 //  Loop Reset, Endings, All Rendering, Menu, Minimap,
 //  HUD, Debug Overlay, Main Game Loop, Boot
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 21 — LOOP RESET
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 21 â€” LOOP RESET
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function triggerLoopReset(customMessage) {
     if (typeof DeathMemories !== "undefined" &&
         typeof DeathMemories.recordDeath === "function") {
@@ -1113,11 +1113,11 @@ function triggerLoopReset(customMessage) {
 
     _snapVisualPosition();
 
-    if (saved.perm.hasFirstSeal)  addItem("seal_1","🔮","Seal Fragment #1");
-    if (saved.perm.hasSecondSeal) addItem("seal_2","🔮","Seal Fragment #2");
-    if (saved.perm.hasThirdSeal)  addItem("seal_3","🔮","Seal Fragment #3");
-    if (saved.perm.hasFourthSeal) addItem("seal_4","🔮","Seal Fragment #4");
-    if (saved.perm.hasFifthSeal)  addItem("seal_5","🔮","Seal Fragment #5");
+    if (saved.perm.hasFirstSeal)  addItem("seal_1","ðŸ”®","Seal Fragment #1");
+    if (saved.perm.hasSecondSeal) addItem("seal_2","ðŸ”®","Seal Fragment #2");
+    if (saved.perm.hasThirdSeal)  addItem("seal_3","ðŸ”®","Seal Fragment #3");
+    if (saved.perm.hasFourthSeal) addItem("seal_4","ðŸ”®","Seal Fragment #4");
+    if (saved.perm.hasFifthSeal)  addItem("seal_5","ðŸ”®","Seal Fragment #5");
 
     dialogQueue  = [];
     dialogActive = false;
@@ -1141,14 +1141,14 @@ function triggerLoopReset(customMessage) {
     _safe(window.setupWeatherForRoom, "foyer");
     _safe(window.saveGame);
 
-    addClue(`loop_${game.loop}`, `— Loop #${game.loop + 1} begins —`);
+    addClue(`loop_${game.loop}`, `â€” Loop #${game.loop + 1} begins â€”`);
 
     const msg = customMessage || "The clock strikes midnight. Time folds back on itself. You remember.";
     transitionState    = "fadeOut";
     transitionAlpha    = 0;
     transitionCallback = () => {
-        showDialog("⏰ TIME RESET", msg);
-        if      (game.loop === 1) showDialog("NARRATOR", "Déjà vu. The manor feels different this time.");
+        showDialog("â° TIME RESET", msg);
+        if      (game.loop === 1) showDialog("NARRATOR", "DÃ©jÃ  vu. The manor feels different this time.");
         else if (game.loop === 2) showDialog("NARRATOR", "Third loop. Your memories are growing sharper.");
         else if (game.loop === 3) showDialog("NARRATOR", "The house has noticed you. It is fighting back.");
         else if (game.loop >= 4)  showDialog("NARRATOR", "You are closer than ever. Do not stop now.");
@@ -1157,9 +1157,9 @@ function triggerLoopReset(customMessage) {
     };
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 22 — ENDINGS
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 22 â€” ENDINGS
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function startEnding(type) {
     game.endingReached = type;
     _stopMenuMusic();
@@ -1184,7 +1184,7 @@ const ENDING_DATA = {
         description: [
             "The five seals shatter in a cascade of cold blue light.",
             "Eleanora Thornwood's spirit rises, finally free of the manor's grip.",
-            "She looks at you — not with gratitude, but with recognition.",
+            "She looks at you â€” not with gratitude, but with recognition.",
             "The front door swings open. Dawn breaks over the estate.",
             "You walk out into the morning. Thornwood Manor grows quiet behind you.",
             "Some chains, it turns out, can be broken.",
@@ -1194,7 +1194,7 @@ const ENDING_DATA = {
     perfect: {
         label:       "PERFECT ENDING",
         title:       "DAWN BREAKS",
-        subtitle:    "Thornwood Manor — End of the Final Loop",
+        subtitle:    "Thornwood Manor â€” End of the Final Loop",
         color:       "#ffcc44",
         glowColor:   "rgba(255,204,68,",
         quote:       '"To understand the darkness, you must have walked through it."',
@@ -1202,7 +1202,7 @@ const ENDING_DATA = {
             "All five seals. Every clue. Every secret the manor ever held.",
             "You stand in the ritual chamber as the entity screams its final scream.",
             "The time loop collapses inward like a dying star.",
-            "Eleanora, Victor, the Ancient — all pass through you like cold smoke.",
+            "Eleanora, Victor, the Ancient â€” all pass through you like cold smoke.",
             "When you open your eyes, you are outside. The sky is the colour of fire.",
             "You remember everything. Every loop. Every death. Every whisper.",
         ],
@@ -1211,13 +1211,13 @@ const ENDING_DATA = {
     sacrifice: {
         label:       "SACRIFICE ENDING",
         title:       "THE NEW GUARDIAN",
-        subtitle:    "Thornwood Manor — For All Time",
+        subtitle:    "Thornwood Manor â€” For All Time",
         color:       "#8866cc",
         glowColor:   "rgba(136,102,204,",
         quote:       '"Some chains are worn willingly. That is what makes them unbreakable."',
         description: [
             "You place yourself at the centre of the ritual.",
-            "The entity recoils — it recognises a willing vessel.",
+            "The entity recoils â€” it recognises a willing vessel.",
             "The loop does not end. It contracts. It binds to you.",
             "You become what Thornwood Manor always needed: a warden.",
             "The living will be safe from it, as long as you hold the line.",
@@ -1228,13 +1228,13 @@ const ENDING_DATA = {
     bad: {
         label:       "BAD ENDING",
         title:       "THE ENTITY IS FREE",
-        subtitle:    "Thornwood Manor — The Last Night",
+        subtitle:    "Thornwood Manor â€” The Last Night",
         color:       "#cc2200",
         glowColor:   "rgba(204,34,0,",
         quote:       '"Some doors were sealed for a reason. Now it knows the way out."',
         description: [
             "The entity tears through the final seal with a sound like breaking bones.",
-            "The manor explodes outward — walls, floors, memories, all of it.",
+            "The manor explodes outward â€” walls, floors, memories, all of it.",
             "You are the last thing it sees before it turns its gaze to the world beyond.",
             "Thornwood was a prison. You helped it escape.",
             "The loop does not reset this time.",
@@ -1315,7 +1315,7 @@ function _drawEnding() {
     ctx.textAlign = "center";
     ctx.fillText(e.subtitle, cw/2, ch*0.32);
 
-    // Description lines — reveal progressively
+    // Description lines â€” reveal progressively
     const descStartY = ch * 0.40;
     const lineH      = Math.min(28, ch*0.042);
     ctx.font         = `${Math.min(15,cw*0.020)}px Georgia, serif`;
@@ -1353,7 +1353,7 @@ function _drawEnding() {
         ctx.fillStyle = "#aa9977";
         ctx.font      = `${Math.min(13,cw*0.018)}px 'Courier New', monospace`;
         ctx.fillText(
-            `Loops: ${game.loop+1}  ·  Level: ${game.level}  ·  Clues: ${game.cluesFound.length}  ·  Rooms: ${roomsVisited.size}  ·  Seals: ${countSeals()}/5`,
+            `Loops: ${game.loop+1}  Â·  Level: ${game.level}  Â·  Clues: ${game.cluesFound.length}  Â·  Rooms: ${roomsVisited.size}  Â·  Seals: ${countSeals()}/5`,
             cw/2, statsY+12
         );
         ctx.globalAlpha = 1;
@@ -1385,14 +1385,14 @@ function _drawEnding() {
         ctx.fillStyle   = "rgba(200,200,200,1)";
         ctx.font        = "14px 'Courier New', monospace";
         ctx.textAlign   = "center";
-        ctx.fillText("▸  Click or Press ENTER to return to the menu  ◂", cw/2, ch*0.94);
+        ctx.fillText("â–¸  Click or Press ENTER to return to the menu  â—‚", cw/2, ch*0.94);
         ctx.globalAlpha = 1;
     }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 23 — MAIN MENU RENDERER
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 23 â€” MAIN MENU RENDERER
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _drawMenu() {
     const cw = canvas.width;
     const ch = canvas.height;
@@ -1430,7 +1430,7 @@ function _drawMenu() {
         ctx.fillRect(px, py, 1+Math.sin(i)*1.5, 1+Math.sin(i)*1.5);
     }
 
-    // ── Logo — smaller on menu, above title ──────────────────
+    // â”€â”€ Logo â€” smaller on menu, above title â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (_logoLoaded && _logoImage) {
         const maxW  = Math.min(280, cw*0.32);
         const maxH  = Math.min(160, ch*0.20);
@@ -1497,7 +1497,7 @@ function _drawMenu() {
 
     ctx.fillStyle = `rgba(150,100,100,${(0.7+Math.sin(t*1.5)*0.2).toFixed(3)})`;
     ctx.font      = `italic ${Math.min(22,cw*0.026)}px Georgia, serif`;
-    ctx.fillText("✦  A Time Loop Mystery  ✦", cx, cy-80);
+    ctx.fillText("âœ¦  A Time Loop Mystery  âœ¦", cx, cy-80);
 
     const descLines = [
         "You are trapped in a haunted mansion.",
@@ -1514,8 +1514,8 @@ function _drawMenu() {
 
     ctx.fillStyle = "rgba(110,100,110,0.55)";
     ctx.font      = "12px 'Courier New', monospace";
-    ctx.fillText("WASD: MOVE  ·  E: INTERACT  ·  Q: ATTACK  ·  F: FLASHLIGHT  ·  J: JOURNAL", cx, cy+130);
-    ctx.fillText("SHIFT: DODGE  ·  U: UNSTUCK  ·  ESC: CLOSE DIALOG", cx, cy+150);
+    ctx.fillText("WASD: MOVE  Â·  E: INTERACT  Â·  Q: ATTACK  Â·  F: FLASHLIGHT  Â·  J: JOURNAL", cx, cy+130);
+    ctx.fillText("SHIFT: DODGE  Â·  U: UNSTUCK  Â·  ESC: CLOSE DIALOG", cx, cy+150);
 
     // Begin prompt
     const bp = 0.5 + Math.sin(t*4)*0.5;
@@ -1525,7 +1525,7 @@ function _drawMenu() {
         ctx.shadowBlur  = 20*bp;
         ctx.fillStyle   = `rgba(240,240,250,${bp.toFixed(3)})`;
         ctx.font        = `bold ${Math.min(20,cw*0.025)}px Georgia, serif`;
-        ctx.fillText("▸  CLICK OR PRESS ENTER TO BEGIN  ◂", cx, cy+200);
+        ctx.fillText("â–¸  CLICK OR PRESS ENTER TO BEGIN  â—‚", cx, cy+200);
         ctx.restore();
     }
 
@@ -1536,163 +1536,108 @@ function _drawMenu() {
             if (sd) {
                 ctx.fillStyle = `rgba(120,180,130,${(0.5+Math.sin(t*1.5)*0.2).toFixed(3)})`;
                 ctx.font      = "14px Georgia, serif";
-                ctx.fillText("[ C ] — Continue Your Descent", cx, cy+235);
+                ctx.fillText("[ C ] â€” Continue Your Descent", cx, cy+235);
             }
         } catch (_) {}
     }
 
     ctx.fillStyle = "rgba(70,60,70,0.4)";
     ctx.font      = "italic 11px Georgia, serif";
-    ctx.fillText("⚜  THORNWOOD MANOR  ·  EST. 1923  ⚜", cx, ch-20);
+    ctx.fillText("âšœ  THORNWOOD MANOR  Â·  EST. 1923  âšœ", cx, ch-20);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 24 — START NEW GAME
-// ═════════════════════════════════════════════════════════════════
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 24 — START NEW GAME / CONTINUE
-// ═════════════════════════════════════════════════════════════════
-
-// The real "start fresh" — extracted so Continue can choose either path
-function _doStartFresh() {
-    _stopMenuMusic();
-    gameState = "playing";
-
-    Object.assign(game, {
-        loop:0, loopTime:0, sanity:100, maxSanity:100,
-        inventory:[], cluesFound:[], journalEntries:[],
-        flags:{}, permanentFlags:{},
-        currentRoom:"foyer", playerX:400, playerY:480, playerAngle:-Math.PI/2,
-        flashlightBattery:100, flashlightOn:true,
-        interactTarget:null, endingReached:null,
-        xp:0, level:1, xpToNext:50, totalXP:0,
-        maxLoopTime:LOOP_DURATION,
-        roomsExplored:0, itemsFound:0, ghostsSeen:0,
-        missionsComplete:0, completedMissions:[], ghostsActive:[],
-    });
-
-    roomsVisited        = new Set(["foyer"]);
-    dialogQueue         = [];
-    dialogActive        = false;
-    dialogBox.classList.add("hidden");
-    journalEl.classList.add("hidden");
-    journalOpen         = false;
-    _lastInteractFrame  = -100;
-    _interactInProgress = false;
-
-    _snapVisualPosition();
-    updateInventoryUI();
-    _safe(window.setupWeatherForRoom, "foyer");
-    _safe(window.resetCombat);
-    _safe(window.initNPCs);
-    _safe(window.installSubtitleOverride);
-
-    if (typeof gameStats !== "undefined") gameStats.gamesPlayed++;
-    _safe(window.saveGame);
-
-    if (typeof GameState !== "undefined" && GameState.startAutosave) {
-        try { GameState.startAutosave(); } catch (_) {}
-    }
-
-    addClue("start", "— Loop #1 begins — You awaken in Thornwood Manor.");
-    showDialog("NARRATOR", "You wake in the grand foyer of Thornwood Manor. The front door is sealed. A grandfather clock counts down to midnight.");
-    showDialog("NARRATOR", "You have a flashlight. Ten minutes remain. Press E to interact with objects, J to open your journal, U if you become stuck.");
-}
-
-// Restore a previously saved game from GameState
-function _doContinue() {
-    _stopMenuMusic();
-    _safe(window.installSubtitleOverride);
-
-    // Reset transient stuff first
-    dialogQueue         = [];
-    dialogActive        = false;
-    dialogBox.classList.add("hidden");
-    journalEl.classList.add("hidden");
-    journalOpen         = false;
-    _lastInteractFrame  = -100;
-    _interactInProgress = false;
-    transitionState     = "none";
-    transitionAlpha     = 0;
-    transitionCallback  = null;
-
-    // Apply saved state via GameState
-    const ok = GameState.load();
-    if (!ok) {
-        console.warn("[Continue] Load failed — starting fresh instead");
-        _doStartFresh();
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 24 â€” START NEW GAME
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+function startNewGame() {
+    // If save exists, show continue prompt instead of starting fresh
+    if (typeof GameState !== "undefined" && GameState.hasSave()) {
+        GameState.showContinuePrompt(
+            // CONTINUE â€” load saved game
+            function() {
+                var loadOk = GameState.load();
+                if (loadOk) {
+                    _safe(window.installSubtitleOverride);
+                    gameState = "playing";
+                    try {
+                        if (game.currentRoom && typeof moveToRoom === "function") {
+                            moveToRoom(game.currentRoom);
+                        }
+                    } catch (e) {}
+                    GameState.startAutosave();
+                    try {
+                        if (typeof SubtitleSystem !== "undefined" && SubtitleSystem.show) {
+                            SubtitleSystem.show("NARRATOR", "The manor remembers you.", 220);
+                        }
+                    } catch(e) {}
+                } else {
+                    _startFresh();
+                }
+            },
+            // NEW GAME â€” wipe save, start over
+            function() {
+                GameState.clear();
+                _startFresh();
+            }
+        );
         return;
     }
 
-    // Sync the global roomsVisited Set with whatever was loaded
-    if (game.roomsVisited && !(game.roomsVisited instanceof Set)) {
-        game.roomsVisited = new Set(game.roomsVisited);
-    }
-    roomsVisited = game.roomsVisited || new Set([game.currentRoom || "foyer"]);
+    // No save â†’ start fresh
+    _startFresh();
+}
 
-    // Make sure the current room is in the visited set
-    if (game.currentRoom) roomsVisited.add(game.currentRoom);
-
-    // Refresh UI from loaded data
-    _snapVisualPosition();
-    updateInventoryUI();
-
-    // Set up audio/weather for the loaded room
-    _safe(window.setupWeatherForRoom, game.currentRoom);
-    if (typeof AudioManager !== "undefined" && AudioManager.initialized) {
-        try { AudioManager.update(game.currentRoom); } catch (_) {}
-    }
-    _safe(window.resetCombat);
-    _safe(window.initNPCs);
-
-    // Start playing
+function _startFresh() {
+    _safe(window.installSubtitleOverride);
     gameState = "playing";
 
-    // Resume autosave
-    if (GameState.startAutosave) {
-        try { GameState.startAutosave(); } catch (_) {}
+    // Reset all game state
+    game.level             = 1;
+    game.xp                = 0;
+    game.xpToNext          = 100;
+    game.totalXP           = 0;
+    game.loop              = 0;
+    game.sanity            = 100;
+    game.maxSanity         = 100;
+    game.flashlightBattery = 100;
+    game.flashlightOn      = false;
+    game.inventory         = [];
+    game.itemsFound        = 0;
+    game.combatWins        = 0;
+    game.roomsExplored     = 0;
+    game.missionsComplete  = 0;
+    game.completedMissions = [];
+    game.sealsFound        = 0;
+    game.flags             = {};
+    game.permanentFlags    = game.permanentFlags || {};
+    game.cluesFound        = [];
+    game.journalEntries    = [];
+    game.roomsVisited      = new Set();
+    game.endingReached     = null;
+    game.currentRoom       = "foyer";
+    game.loopTime          = 0;
+
+    // Start autosave
+    if (typeof GameState !== "undefined") {
+        GameState.startAutosave();
     }
 
-    // Friendly message
+    // Move to starting room
     try {
-        showDialog("NARRATOR",
-            "The manor remembers you. You return to " +
-            (game.currentRoom || "the foyer").replace(/_/g, " ") +
-            " on loop " + ((game.loop || 0) + 1) + ".");
-    } catch (_) {}
+        if (typeof moveToRoom === "function") moveToRoom("foyer");
+    } catch (e) {}
 
-    console.log("[Continue] Restored: room=" + game.currentRoom +
-                " level=" + game.level + " loop=" + game.loop +
-                " pos=" + game.playerX + "," + game.playerY);
+    // Intro dialogue
+    try {
+        showDialog("NARRATOR", "You wake in the grand foyer of Thornwood Manor. The front door is locked.");
+        showDialog("NARRATOR", "You have a flashlight. Ten minutes remain. Press E to interact with objects.");
+    } catch (e) {}
 }
 
-// Public entry — decides between Continue prompt or fresh start
-function startNewGame() {
-    _ensureAudio();
 
-    // If a save exists, ask the player
-    if (typeof GameState !== "undefined" && GameState.hasSave && GameState.hasSave()) {
-        try {
-            GameState.showContinuePrompt(
-                _doContinue,        // Continue button
-                function() {        // New Game button
-                    if (GameState.clear) { try { GameState.clear(); } catch (_) {} }
-                    _doStartFresh();
-                }
-            );
-            return;
-        } catch (e) {
-            console.warn("[startNewGame] Continue prompt failed:", e);
-        }
-    }
-
-    // No save → start fresh immediately
-    _doStartFresh();
-}
-
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 25 — RENDER ENGINE
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 25 â€” RENDER ENGINE
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function render() {
     const room = getCurrentRoom();
     if (!room) return;
@@ -1784,7 +1729,7 @@ function render() {
     if (debugOverlay) try { _drawDebugOverlay(); } catch (_) {}
 }
 
-// ─── FURNITURE ──────────────────────────────────────────────────
+// â”€â”€â”€ FURNITURE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawFurniture(room) {
     if (!Array.isArray(room.furniture)) return;
     for (const f of room.furniture) {
@@ -1909,7 +1854,7 @@ function _drawFurniturePiece(f) {
     }
 }
 
-// ─── DOORS ──────────────────────────────────────────────────────
+// â”€â”€â”€ DOORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawDoors(room) {
     if (!Array.isArray(room.doors)) return;
     for (const d of room.doors) {
@@ -1925,7 +1870,7 @@ function _drawDoors(room) {
     }
 }
 
-// ─── INTERACTABLES ──────────────────────────────────────────────
+// â”€â”€â”€ INTERACTABLES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawInteractables(room) {
     if (!Array.isArray(room.interactables)) return;
     for (const obj of room.interactables) {
@@ -1938,7 +1883,7 @@ function _drawInteractables(room) {
     }
 }
 
-// ─── GHOSTS ─────────────────────────────────────────────────────
+// â”€â”€â”€ GHOSTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawGhosts(room) {
     if (!Array.isArray(room.ghosts)) return;
     const GC = { entity:"#2a0040",victor:"#402020",eleanora:"#204060",ancient:"#303020",deep_one:"#102040",doppelganger:"#404040" };
@@ -1969,7 +1914,7 @@ function _drawGhosts(room) {
     }
 }
 
-// ─── PLAYER DRAW ────────────────────────────────────────────────
+// â”€â”€â”€ PLAYER DRAW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawPlayer() {
     ctx.save(); ctx.translate(_visX,_visY);
     ctx.fillStyle="rgba(0,0,0,0.3)";
@@ -1988,7 +1933,7 @@ function _drawPlayer() {
     ctx.restore();
 }
 
-// ─── LIGHTING ───────────────────────────────────────────────────
+// â”€â”€â”€ LIGHTING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawLighting(room) {
     if (!_lightingCanvas) { _lightingCanvas=document.createElement("canvas"); _lightingCtx=_lightingCanvas.getContext("2d"); }
     if (_lightingCanvas.width!==room.width||_lightingCanvas.height!==room.height) {
@@ -2042,7 +1987,7 @@ function _drawLighting(room) {
     ctx.drawImage(_lightingCanvas,0,0);
 }
 
-// ─── SANITY EFFECTS ─────────────────────────────────────────────
+// â”€â”€â”€ SANITY EFFECTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawSanityEffects() {
     const s=game.sanity, cw=canvas.width, ch=canvas.height;
     if (s<50) { ctx.fillStyle=`rgba(50,0,0,${((50-s)/500).toFixed(3)})`; ctx.fillRect(0,0,cw,ch); }
@@ -2055,7 +2000,7 @@ function _drawSanityEffects() {
     if (s<15) { ctx.fillStyle=`rgba(30,0,0,${(0.05+Math.sin(frame*0.1)*0.03).toFixed(3)})`; ctx.fillRect(0,0,cw,ch); }
 }
 
-// ─── HUD ────────────────────────────────────────────────────────
+// â”€â”€â”€ HUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawHUD() {
     const cw=canvas.width, ch=canvas.height, p=15;
     const room=getCurrentRoom(); if (!room) return;
@@ -2090,7 +2035,7 @@ function _drawHUD() {
     ctx.fillStyle="rgba(30,30,30,0.6)"; ctx.fillRect(fX,fY,80,6);
     ctx.fillStyle=game.flashlightOn?"rgba(255,220,100,0.6)":"rgba(100,100,100,0.4)";
     ctx.fillRect(fX,fY,80*(game.flashlightBattery/100),6);
-    ctx.fillText(game.flashlightOn?"🔦 ON [F]":"🔦 OFF [F]",cw-p,fY-2);
+    ctx.fillText(game.flashlightOn?"ðŸ”¦ ON [F]":"ðŸ”¦ OFF [F]",cw-p,fY-2);
 
     if (typeof combat!=="undefined"&&typeof WEAPONS!=="undefined") {
         const wpn=WEAPONS[combat.equippedWeapon]||WEAPONS.fists;
@@ -2098,12 +2043,12 @@ function _drawHUD() {
     }
 
     ctx.fillStyle="rgba(150,120,80,0.5)"; ctx.font="11px 'Courier New', monospace"; ctx.textAlign="left";
-    ctx.fillText(`Clues:${game.cluesFound.length} Seals:${countSeals()}/5 Rooms:${roomsVisited.size} 🏆${game.completedMissions.length}`,p,ch-p);
+    ctx.fillText(`Clues:${game.cluesFound.length} Seals:${countSeals()}/5 Rooms:${roomsVisited.size} ðŸ†${game.completedMissions.length}`,p,ch-p);
     ctx.fillStyle="rgba(100,100,100,0.3)"; ctx.font="10px 'Courier New', monospace"; ctx.textAlign="right";
     ctx.fillText("WASD:Move E:Interact Q:Attack Shift:Dodge F:Flash J:Journal U:Unstuck",cw-p,ch-p);
 }
 
-// ─── INTERACT PROMPT ────────────────────────────────────────────
+// â”€â”€â”€ INTERACT PROMPT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawInteractPrompt() {
     if (dialogActive||journalOpen) return;
     if (typeof getNearestNPC==="function") {
@@ -2112,17 +2057,17 @@ function _drawInteractPrompt() {
             const hasQ=(typeof npc._getCompletableQuest==="function"&&npc._getCompletableQuest());
             const hasA=!hasQ&&(typeof npc._getAvailableQuest==="function"&&npc._getAvailableQuest());
             ctx.fillStyle="rgba(200,220,255,0.8)"; ctx.font="14px Georgia, serif"; ctx.textAlign="center";
-            ctx.fillText(`[E] Talk to ${npc.name}${hasQ?" ❓":hasA?" ❗":""}`,canvas.width/2,canvas.height-60);
+            ctx.fillText(`[E] Talk to ${npc.name}${hasQ?" â“":hasA?" â—":""}`,canvas.width/2,canvas.height-60);
             return;
         }
     }
     if (!game.interactTarget) return;
-    const label=game.interactTarget.isDoor?`→ ${game.interactTarget.label||"Door"}`:(game.interactTarget.label||"Interact");
+    const label=game.interactTarget.isDoor?`â†’ ${game.interactTarget.label||"Door"}`:(game.interactTarget.label||"Interact");
     ctx.fillStyle="rgba(200,200,200,0.75)"; ctx.font="14px Georgia, serif"; ctx.textAlign="center";
     ctx.fillText(`[E] ${label}`,canvas.width/2,canvas.height-60);
 }
 
-// ─── TRANSITION ─────────────────────────────────────────────────
+// â”€â”€â”€ TRANSITION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _drawTransition() {
     if (transitionState==="none"&&transitionAlpha<=0) return;
     if (transitionState==="fadeOut") {
@@ -2139,9 +2084,9 @@ function _drawTransition() {
     ctx.fillRect(0,0,canvas.width,canvas.height);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 26 — MINIMAP
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 26 â€” MINIMAP
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const MINIMAP_LAYOUT = {
     foyer:{x:80,y:55},library:{x:40,y:55},dining_room:{x:120,y:55},
     kitchen:{x:80,y:80},parlor:{x:60,y:80},ballroom:{x:140,y:40},
@@ -2174,9 +2119,9 @@ function _drawMinimap() {
     mc.fillText("MAP",mw/2,mh-3);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 27 — DEBUG OVERLAY
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 27 â€” DEBUG OVERLAY
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function _drawDebugOverlay() {
     ctx.fillStyle="rgba(0,0,0,0.78)";
     ctx.fillRect(canvas.width-268,80,258,240);
@@ -2191,7 +2136,7 @@ function _drawDebugOverlay() {
         `Battery:  ${game.flashlightBattery.toFixed(1)}`,
         `LoopTime: ${game.loopTime.toFixed(1)}/${game.maxLoopTime}`,
         `DialogQ:  ${dialogQueue.length}`,
-        `Trans:    ${transitionState} α=${transitionAlpha.toFixed(2)}`,
+        `Trans:    ${transitionState} Î±=${transitionAlpha.toFixed(2)}`,
         `XP:       ${game.xp}/${game.xpToNext}`,
         `Level:    ${game.level}`,
         `Missions: ${game.completedMissions.length}`,
@@ -2203,9 +2148,9 @@ function _drawDebugOverlay() {
     for (const line of lines) { ctx.fillText(line,canvas.width-258,y); y+=14; }
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 28 — MAIN GAME LOOP
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 28 â€” MAIN GAME LOOP
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function gameLoop() {
     frame = (frame + 1) % 1000000;
 
@@ -2223,13 +2168,13 @@ function gameLoop() {
     try {
         switch (gameState) {
 
-            // ── SPLASH — logo only on black, waiting for input ─
+            // â”€â”€ SPLASH â€” logo only on black, waiting for input â”€
             case "splash":
                 try { _drawSplash(); } catch (_) {}
                 // Key input handled in keydown listener above
                 break;
 
-            // ── INTRO — horror dialogue on dark screen ─────────
+            // â”€â”€ INTRO â€” horror dialogue on dark screen â”€â”€â”€â”€â”€â”€â”€â”€â”€
             case "intro":
                 _tickIntroTyping();
                 try { _drawIntro(); } catch (_) {}
@@ -2241,7 +2186,7 @@ function gameLoop() {
                 }
                 break;
 
-            // ── MENU — full menu screen ────────────────────────
+            // â”€â”€ MENU â€” full menu screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             case "menu":
                 try { _drawMenu(); } catch (_) {}
                 if (keysJustPressed["Enter"] || keysJustPressed["Space"]) {
@@ -2263,7 +2208,7 @@ function gameLoop() {
                 }
                 break;
 
-             // ── PLAYING ───────────────────────────────────────
+             // â”€â”€ PLAYING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             case "playing":
                 try { updatePlayer();          } catch (_) {}
                 try { updateLoopTimer();       } catch (_) {}
@@ -2288,16 +2233,16 @@ function gameLoop() {
                 try { render(); } catch (e) {
                     ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
                     ctx.fillStyle="#f88"; ctx.font="14px monospace"; ctx.textAlign="center";
-                    ctx.fillText("Render error — game continues",canvas.width/2,canvas.height/2);
+                    ctx.fillText("Render error â€” game continues",canvas.width/2,canvas.height/2);
                 }
                 break;
 
-            // ── PAUSED — controls.js freezes gameplay and draws overlay ─
+            // â”€â”€ PAUSED â€” controls.js freezes gameplay and draws overlay â”€
             case "paused":
                 try { render(); } catch (_) {}
                 break;
 
-            // ── ENDING ────────────────────────────────────────
+            // â”€â”€ ENDING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             case "ending":
                 try { _drawEnding(); } catch (_) {}
                 if (keysJustPressed["Enter"]||keysJustPressed["Space"]) {
@@ -2311,7 +2256,7 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-// ═════════════════════════════════════════════════════════════════
-//  SECTION 29 — BOOT
-// ═════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+//  SECTION 29 â€” BOOT
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 requestAnimationFrame(gameLoop);

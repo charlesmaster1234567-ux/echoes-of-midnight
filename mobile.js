@@ -386,6 +386,10 @@ const Mobile = (function() {
     //  TOUCH EVENT HANDLERS
     // ─────────────────────────────────────────────────────────────
     function _onTouchStart(e) {
+        // If continue modal is open, let it handle its own buttons
+        if (document.getElementById("eom-continue-modal")) {
+            return; // do NOT preventDefault — allow native button clicks
+        }
         e.preventDefault();
         _unlockAudio();
 
@@ -409,6 +413,10 @@ const Mobile = (function() {
 
             // ── Menu state ───────────────────────────────────
             if (gs === "menu") {
+                // If continue modal is already open, let it handle taps natively
+                if (document.getElementById("eom-continue-modal")) {
+                    return;
+                }
                 try {
                     if (typeof startNewGame === "function") startNewGame();
                 } catch(_) {}
@@ -452,6 +460,7 @@ const Mobile = (function() {
     }
 
     function _onTouchMove(e) {
+        if (document.getElementById("eom-continue-modal")) return;
         e.preventDefault();
         for (const touch of e.changedTouches) {
             if (!_joy.active || touch.identifier !== _joy.touchId) continue;
@@ -482,6 +491,7 @@ const Mobile = (function() {
     }
 
     function _onTouchEnd(e) {
+        if (document.getElementById("eom-continue-modal")) return;
         e.preventDefault();
         for (const touch of e.changedTouches) {
             const id = touch.identifier;

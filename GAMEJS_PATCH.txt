@@ -1,0 +1,88 @@
+// ════════════════════════════════════════════════════════════════
+// PASTE THIS TO REPLACE THE EXISTING startNewGame() FUNCTION
+// ════════════════════════════════════════════════════════════════
+
+function startNewGame() {
+    // If save exists, show continue prompt instead of starting fresh
+    if (typeof GameState !== "undefined" && GameState.hasSave()) {
+        GameState.showContinuePrompt(
+            // CONTINUE — load saved game
+            function() {
+                var loadOk = GameState.load();
+                if (loadOk) {
+                    _safe(window.installSubtitleOverride);
+                    gameState = "playing";
+                    try {
+                        if (game.currentRoom && typeof moveToRoom === "function") {
+                            moveToRoom(game.currentRoom);
+                        }
+                    } catch (e) {}
+                    GameState.startAutosave();
+                    try {
+                        if (typeof SubtitleSystem !== "undefined" && SubtitleSystem.show) {
+                            SubtitleSystem.show("NARRATOR", "The manor remembers you.", 220);
+                        }
+                    } catch(e) {}
+                } else {
+                    _startFresh();
+                }
+            },
+            // NEW GAME — wipe save, start over
+            function() {
+                GameState.clear();
+                _startFresh();
+            }
+        );
+        return;
+    }
+
+    // No save → start fresh
+    _startFresh();
+}
+
+function _startFresh() {
+    _safe(window.installSubtitleOverride);
+    gameState = "playing";
+
+    // Reset all game state
+    game.level             = 1;
+    game.xp                = 0;
+    game.xpToNext          = 100;
+    game.totalXP           = 0;
+    game.loop              = 0;
+    game.sanity            = 100;
+    game.maxSanity         = 100;
+    game.flashlightBattery = 100;
+    game.flashlightOn      = false;
+    game.inventory         = [];
+    game.itemsFound        = 0;
+    game.combatWins        = 0;
+    game.roomsExplored     = 0;
+    game.missionsComplete  = 0;
+    game.completedMissions = [];
+    game.sealsFound        = 0;
+    game.flags             = {};
+    game.permanentFlags    = game.permanentFlags || {};
+    game.cluesFound        = [];
+    game.journalEntries    = [];
+    game.roomsVisited      = new Set();
+    game.endingReached     = null;
+    game.currentRoom       = "foyer";
+    game.loopTime          = 0;
+
+    // Start autosave
+    if (typeof GameState !== "undefined") {
+        GameState.startAutosave();
+    }
+
+    // Move to starting room
+    try {
+        if (typeof moveToRoom === "function") moveToRoom("foyer");
+    } catch (e) {}
+
+    // Intro dialogue
+    try {
+        showDialog("NARRATOR", "You wake in the grand foyer of Thornwood Manor. The front door is locked.");
+        showDialog("NARRATOR", "You have a flashlight. Ten minutes remain. Press E to interact with objects.");
+    } catch (e) {}
+}

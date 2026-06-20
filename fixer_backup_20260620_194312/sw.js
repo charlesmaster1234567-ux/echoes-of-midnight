@@ -6,7 +6,7 @@
 
 "use strict";
 
-const SW_VERSION    = "eom-v3.3.0";
+const SW_VERSION    = "eom-v3.2.0";
 const CACHE_CORE    = SW_VERSION + "-core";
 const CACHE_AUDIO   = SW_VERSION + "-audio";
 const CACHE_ASSETS  = SW_VERSION + "-assets";
@@ -287,32 +287,19 @@ async function fetchAndCache(cache, url) {
 
     let response;
     try {
-        response = await fetch(url, {
-            signal: controller.signal,
-            cache:  "no-cache",
-        });
+        response = await fetch(url, { signal: controller.signal, cache: "no-cache" });
         clearTimeout(timer);
     } catch (err) {
         clearTimeout(timer);
         throw err;
     }
 
-    // Skip non-OK and partial responses (206 breaks Cache API)
-    if (!response.ok || response.status === 206) {
-        if (response.status === 206) {
-            console.warn("[SW] Skipping partial response: " + url);
-            return;
-        }
+    if (!response.ok) {
         throw new Error("HTTP " + response.status + " for " + url);
     }
 
-    try {
-        await cache.put(url, response.clone());
-    } catch (e) {
-        console.warn("[SW] Cache put failed for " + url + ": " + e.message);
-    }
+    await cache.put(url, response);
 }
-
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ACTIVATE
@@ -367,7 +354,7 @@ async function cacheFirst(req, cacheName) {
     }
     try {
         const res = await fetch(req);
-        if (res.ok && res.status !== 206) { const c = await caches.open(cacheName); c.put(req, res.clone()); }
+        if (res.ok) { const c = await caches.open(cacheName); c.put(req, res.clone()); }
         return res;
     } catch (e) { return offlineFallback(req); }
 }
@@ -375,7 +362,7 @@ async function cacheFirst(req, cacheName) {
 async function staleWhileRevalidate(req) {
     const cached = await caches.match(req);
     const netP = fetch(req).then(async (res) => {
-        if (res.ok && res.status !== 206) { const c = await caches.open(CACHE_CORE); await c.put(req, res.clone()); }
+        if (res.ok) { const c = await caches.open(CACHE_CORE); await c.put(req, res.clone()); }
         return res;
     }).catch(() => null);
     return cached || await netP || offlineFallback(req);
@@ -384,7 +371,7 @@ async function staleWhileRevalidate(req) {
 async function networkFirst(req) {
     try {
         const res = await fetch(req);
-        if (res.ok && res.status !== 206) { const c = await caches.open(CACHE_DYNAMIC); c.put(req, res.clone()); }
+        if (res.ok) { const c = await caches.open(CACHE_DYNAMIC); c.put(req, res.clone()); }
         return res;
     } catch (e) {
         const cached = await caches.match(req);
